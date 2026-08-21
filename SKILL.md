@@ -10,6 +10,35 @@ Import media and related documents as a faithful, filesystem-searchable Markdown
 corpus. Keep source wording and chronology. Do not summarize or reorganize the
 content pedagogically.
 
+## Installation
+
+The skill runs the `media-import` executable from the published
+`pro-ledin-media-import` package. Install it before processing a source:
+
+```bash
+python -m pip install pro-ledin-media-import
+media-import --help
+```
+
+On macOS, install the system video dependencies separately:
+
+```bash
+brew install ffmpeg
+ffmpeg -version
+ffprobe -version
+```
+
+For local development from the repository:
+
+```bash
+uv sync --extra dev
+uv run media-import --help
+```
+
+If `media-import` is unavailable, report the exact installation command and get
+user approval before installing anything. Do not start an import without a
+working CLI and the required `ffmpeg`/`ffprobe` executables for audio or video.
+
 ## Workflow
 
 1. Resolve the source as a local path, `file://` URI, direct HTTP(S) media URL,

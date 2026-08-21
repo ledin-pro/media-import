@@ -6,6 +6,23 @@ and direct HTTP(S) media URLs into an Obsidian-compatible Markdown corpus.
 Docling is the sole media conversion engine. `pro-ledin-ocr` recognizes visual
 text in sampled video frames and image-based documents when needed.
 
+## Install
+
+Install the published package and verify the CLI:
+
+```bash
+python -m pip install pro-ledin-media-import
+media-import --help
+```
+
+On macOS, install the system video dependencies separately:
+
+```bash
+brew install ffmpeg
+ffmpeg -version
+ffprobe -version
+```
+
 ## Install for development
 
 ```bash
@@ -23,7 +40,7 @@ are never started by `inspect` or `--dry-run`.
 ```bash
 uv run media-import inspect ./recordings --vault-root ~/vault --output-dir sources/demo
 uv run media-import import ./recordings --vault-root ~/vault --output-dir sources/demo --dry-run
-uv run media-import import ./recordings --vault-root ~/vault --output-dir sources/demo
+uv run media-import import ./recordings --vault-root ~/vault --output-dir sources/demo --confirmed
 uv run media-import validate --output-dir ~/vault/sources/demo --source ./recordings
 uv run media-import status --output-dir ~/vault/sources/demo
 ```
