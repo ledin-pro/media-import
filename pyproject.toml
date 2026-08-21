@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pro-ledin-media-import"
-version = "0.1.1"
+version = "0.1.2"
 description = "Faithful media and document imports into Markdown corpora"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ authors = [{ name = "Michael Ledin" }]
 dependencies = [
   "docling>=2.121,<3",
   "docling-slim[format-video]>=2.121,<3",
-  "pro-ledin-ocr>=0.6,<0.7",
+  "pro-ledin-ocr>=0.6.1,<0.7",
   "PyYAML>=6.0",
 ]
 
