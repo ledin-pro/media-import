@@ -31,6 +31,24 @@ def test_config_precedence_and_secret_redaction(tmp_path: Path) -> None:
     assert "secret" not in str(config.public_dict())
 
 
+def test_config_supports_disabling_frame_processing(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "sources/demo",
+            "frame_mode": "none",
+            "external_processing_approved": True,
+        },
+        environ={
+            "MEDIA_IMPORT_OCR_ENGINE": "vision",
+            "MEDIA_IMPORT_VISION_API_KEY": "secret",
+            "MEDIA_IMPORT_VISION_MODEL": "model",
+        },
+    )
+    assert config.frame_mode == "none"
+
+
 def test_config_rejects_output_escape(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="inside vault_root"):
         load_config(

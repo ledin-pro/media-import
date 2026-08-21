@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pro.ledin.media_import.config import Config
-from pro.ledin.media_import.docling_documents import _pandoc
+from pro.ledin.media_import.docling_documents import _ocr_script, _pandoc
 
 
 def test_pandoc_fallback_uses_argument_list(tmp_path: Path, monkeypatch) -> None:
@@ -35,3 +35,38 @@ def test_config_accepts_explicit_office_fallback(tmp_path: Path) -> None:
         office_fallback="pandoc",
     )
     assert config.office_fallback == "pandoc"
+
+
+def test_ocr_script_routes_image_documents_without_exposing_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "image.png"
+    source.write_bytes(b"image")
+    config = Config(
+        source=str(tmp_path),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        ocr_engine="vision",
+        vision_api_url="http://127.0.0.1:4000/v1",
+        vision_api_key="secret",
+        vision_model="model",
+    )
+    captured = {}
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/ocr")
+
+    def fake_run(arguments, **kwargs):
+        captured["arguments"] = arguments
+        captured["environment"] = kwargs["env"]
+        output_dir = Path(arguments[arguments.index("--out") + 1])
+        (output_dir / "image.md").write_text("# OCR output", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = _ocr_script(source, config)
+
+    assert result.route == "ocr"
+    assert result.document.export_to_markdown() == "# OCR output"
+    assert "secret" not in captured["arguments"]
+    assert captured["environment"]["OCR_VISION_API_KEY"] == "secret"

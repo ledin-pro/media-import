@@ -46,7 +46,7 @@ def _parser() -> argparse.ArgumentParser:
         child.add_argument("--config", type=Path)
         child.add_argument("--cache-dir", type=Path)
         child.add_argument("--asset-mode", choices=["reference", "copy"])
-        child.add_argument("--frame-mode", choices=["text", "text-and-images", "images"])
+        child.add_argument("--frame-mode", choices=["none", "text", "text-and-images", "images"])
         child.add_argument("--layout", choices=["mirror", "mapped"])
         child.add_argument("--language")
         child.add_argument("--ocr-language")

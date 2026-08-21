@@ -16,7 +16,7 @@ OCR_ENGINES = {"tesseract", "easyocr", "paddleocr", "paddleocr-vl-mlx", "vision"
 TRANSCRIPTION_PROVIDERS = {"auto", "existing", "docling-mlx", "docling-native", "off"}
 TRANSCRIPTION_POLICIES = {"prefer-existing", "missing", "force"}
 ASSET_MODES = {"reference", "copy"}
-FRAME_MODES = {"text", "text-and-images", "images"}
+FRAME_MODES = {"none", "text", "text-and-images", "images"}
 LAYOUTS = {"mirror", "mapped"}
 OFFICE_FALLBACKS = {"none", "auto", "markitdown", "pandoc"}
 

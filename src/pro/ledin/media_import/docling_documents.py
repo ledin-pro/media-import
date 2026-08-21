@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,9 @@ class FallbackResult:
     route: str
     status: str = "success"
     errors: tuple[str, ...] = ()
+
+
+OCR_DOCUMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".heic"}
 
 
 def _markitdown(source: Path) -> FallbackResult:
@@ -85,9 +90,56 @@ def _fallback(source: Path, config: Config, cause: Exception) -> FallbackResult:
     raise DoclingDocumentError("; ".join(errors)) from cause
 
 
+def _ocr_script(source: Path, config: Config) -> FallbackResult:
+    executable = shutil.which("ocr")
+    if executable is None:
+        raise DoclingDocumentError("OCR CLI is not installed")
+
+    engine = config.ocr_engine or "tesseract"
+    command = [
+        executable,
+        str(source),
+        "--engine",
+        engine,
+        "--format",
+        "md,txt,json",
+    ]
+    if config.ocr_language != "auto":
+        command.extend(["--lang", config.ocr_language])
+
+    environment = os.environ.copy()
+    if config.vision_api_url:
+        environment["OCR_VISION_API_URL"] = config.vision_api_url
+    if config.vision_api_key:
+        environment["OCR_VISION_API_KEY"] = config.vision_api_key
+    if config.vision_model:
+        environment["OCR_VISION_MODEL"] = config.vision_model
+
+    with tempfile.TemporaryDirectory(prefix="media-import-ocr-") as output_dir:
+        command.extend(["--out", output_dir])
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=config.ocr_timeout_seconds,
+            env=environment,
+        )
+        markdown_path = Path(output_dir) / f"{source.stem}.md"
+        if completed.returncode != 0 or not markdown_path.exists():
+            detail = (completed.stderr or completed.stdout or "OCR returned no output").strip()
+            raise DoclingDocumentError(f"OCR CLI failed: {detail}")
+        markdown = markdown_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not markdown:
+            raise DoclingDocumentError("OCR CLI returned empty output")
+        return FallbackResult(FallbackDocument(markdown, "ocr"), "ocr")
+
+
 def convert_document(source: Path | str, config: Config) -> Any:
     from docling.document_converter import DocumentConverter
 
+    if isinstance(source, Path) and source.suffix.casefold() in OCR_DOCUMENT_EXTENSIONS:
+        return _ocr_script(source, config)
     if isinstance(source, Path) and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}:
         inspect_office_package(source)
     converter = DocumentConverter()
