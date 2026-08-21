@@ -38,7 +38,6 @@ def test_config_supports_disabling_frame_processing(tmp_path: Path) -> None:
             "vault_root": tmp_path / "vault",
             "output_dir": "sources/demo",
             "frame_mode": "none",
-            "external_processing_approved": True,
         },
         environ={
             "MEDIA_IMPORT_OCR_ENGINE": "vision",
@@ -47,6 +46,7 @@ def test_config_supports_disabling_frame_processing(tmp_path: Path) -> None:
         },
     )
     assert config.frame_mode == "none"
+    assert config.external_processing_approved is True
 
 
 def test_config_rejects_output_escape(tmp_path: Path) -> None:

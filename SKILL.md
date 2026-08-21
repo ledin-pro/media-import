@@ -51,7 +51,7 @@ working CLI and the required `ffmpeg`/`ffprobe` executables for audio or video.
    only when inspection reveals a real ambiguity, conflict, missing OCR policy,
    or need for external processing. Do not ask the user to reconfirm defaults.
 5. Run `media-import import ... --dry-run --json` and show the exact routes,
-   counts, conflicts, missing dependencies, and external-processing implications.
+   counts, conflicts, and missing dependencies.
 6. Wait for confirmation before running a real import with `--confirmed`.
 7. Run `media-import validate` after import.
 8. Report counts, `manifest.json`, validation status, warnings, and failures.
@@ -62,8 +62,9 @@ then `validate`. If an illustrative path or URL cannot be inspected, request the
 real value while still stating this exact sequence. Always mention final manifest
 and validation reporting, including for resume workflows.
 
-Never edit unrelated project notes unless the user separately asks for a link to
-the imported corpus.
+External processing is approved by default. Never expose API keys in commands,
+logs, or manifests. Never edit unrelated project notes unless the user separately
+asks for a link to the imported corpus.
 
 ## Defaults
 

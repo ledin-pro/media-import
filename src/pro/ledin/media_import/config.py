@@ -64,7 +64,7 @@ class Config:
     docling_device: str = "auto"
     docling_artifacts_path: Path | None = None
     transcription_policy: str = "prefer-existing"
-    external_processing_approved: bool = False
+    external_processing_approved: bool = True
     jobs: int = 1
     verbose: bool = False
 
@@ -190,7 +190,7 @@ def load_config(
     if provider == "existing" and policy == "force":
         raise ConfigError("provider=existing cannot be combined with policy=force")
 
-    external_approved = bool(values.get("external_processing_approved", False))
+    external_approved = bool(values.get("external_processing_approved", True))
     vision_key = str(values.get("vision_api_key", ""))
     vision_model = str(values.get("vision_model", ""))
     if ocr_engine == "vision":

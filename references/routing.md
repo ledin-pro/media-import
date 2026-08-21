@@ -3,10 +3,11 @@
 ## Required decisions
 
 Resolve the source, vault root, relative output directory, layout, asset mode,
-frame mode, language, OCR language, transcription policy, existing-output policy,
-and external-processing approval. Reuse values already present in the request.
+frame mode, language, OCR language, transcription policy, and existing-output
+policy. Reuse values already present in the request.
 
-Defaults are `mirror`, `reference`, `text`, `auto`, and `prefer-existing`.
+Defaults are `mirror`, `reference`, `text`, `auto`, `prefer-existing`, and
+external processing approved.
 
 ## Commands
 

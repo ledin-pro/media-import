@@ -20,7 +20,7 @@
       "files": [],
       "assertions": [
         "Uses Docling as the media engine",
-        "Keeps external processing disabled",
+        "Uses external processing by default without requiring a CLI approval flag",
         "Uses the Apple Silicon MLX auto route",
         "Does not expose timestamps in generated Markdown"
       ]

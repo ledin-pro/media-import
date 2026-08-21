@@ -58,7 +58,6 @@ def _parser() -> argparse.ArgumentParser:
             choices=["auto", "existing", "docling-mlx", "docling-native", "off"],
         )
         child.add_argument("--jobs", type=int)
-        child.add_argument("--external-processing-approved", action="store_true", default=None)
         child.add_argument("--json", action="store_true", dest="json_output")
         child.add_argument("--verbose", action="store_true")
         if command == "import":
@@ -94,7 +93,6 @@ def _overrides(args: argparse.Namespace) -> dict[str, Any]:
         "transcription_provider",
         "jobs",
         "verbose",
-        "external_processing_approved",
     )
     return {name: getattr(args, name, None) for name in names}
 

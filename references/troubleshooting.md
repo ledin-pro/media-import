@@ -13,7 +13,7 @@ Install both `ffmpeg` and `ffprobe`, then rerun `inspect`.
 ## Missing OCR engine
 
 Set `MEDIA_IMPORT_OCR_ENGINE` to a supported `pro-ledin-ocr` engine. Vision OCR
-also requires the API key, model, and explicit external-processing approval.
+also requires the API key and model; external processing is approved by default.
 
 ## Apple Silicon MLX
 
