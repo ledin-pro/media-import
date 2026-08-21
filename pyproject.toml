@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pro-ledin-media-import"
+version = "0.1.0"
+description = "Faithful media and document imports into Markdown corpora"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Michael Ledin" }]
+dependencies = [
+  "docling>=2.121,<3",
+  "docling-slim[format-video]>=2.121,<3",
+  "pro-ledin-ocr>=0.6,<0.7",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+office-fallback = [
+  "markitdown[docx,xlsx,pptx]",
+  "openpyxl",
+]
+docling-vlm = ["docling[vlm]"]
+dev = [
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.11",
+]
+
+[project.scripts]
+media-import = "pro.ledin.media_import.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pro"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+follow_imports = "skip"
+packages = ["pro.ledin.media_import"]
+mypy_path = "src"
+
+[tool.uv.sources]
+pro-ledin-ocr = { path = "../ocr", editable = true }

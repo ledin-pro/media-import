@@ -1,0 +1,41 @@
+{
+  "skill_name": "media-import",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Import /Users/me/recordings/leadership-course into my Obsidian vault at /Users/me/vault under sources/leadership. The folder contains MP4 lectures, MP3 audio, PDFs, and PPTX handouts.",
+      "expected_output": "The agent inspects the source, resolves policies, runs and presents a dry-run, waits for confirmation, imports through media-import, validates the corpus, and reports manifest status.",
+      "files": [],
+      "assertions": [
+        "Runs inspect and dry-run before any write",
+        "Waits for explicit confirmation before --confirmed",
+        "Uses one Markdown artifact per media source with chronological visual text",
+        "Reports manifest and validation status"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Archive https://example.com/talk.mp4 as searchable Markdown in ~/vault/sources/talk. This Mac is Apple Silicon and I want local processing only.",
+      "expected_output": "The agent selects Docling media conversion, keeps remote services disabled, uses the auto MLX Whisper Turbo route on Apple Silicon, and follows the dry-run confirmation gate.",
+      "files": [],
+      "assertions": [
+        "Uses Docling as the media engine",
+        "Keeps external processing disabled",
+        "Uses the Apple Silicon MLX auto route",
+        "Does not expose timestamps in generated Markdown"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Resume the media import in ~/vault/sources/conference after I edited one generated transcript by hand and replaced one source video.",
+      "expected_output": "The agent inspects current state, protects the manually modified transcript, identifies the changed source, presents a dry-run, and resumes only after confirmation.",
+      "files": [],
+      "assertions": [
+        "Does not overwrite the manually modified artifact",
+        "Detects the changed source hash",
+        "Presents resume conflicts in dry-run",
+        "Runs validation after resume"
+      ]
+    }
+  ]
+}

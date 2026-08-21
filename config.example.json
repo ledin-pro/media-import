@@ -1,0 +1,15 @@
+{
+  "asset_mode": "reference",
+  "frame_mode": "text",
+  "layout": "mirror",
+  "path_map": {},
+  "office_fallback": "none",
+  "language": "auto",
+  "ocr_language": "auto",
+  "transcription_policy": "prefer-existing",
+  "transcription_provider": "auto",
+  "transcription_model": "whisper_turbo",
+  "transcription_timeout_seconds": 3600,
+  "ocr_timeout_seconds": 600,
+  "jobs": 1
+}

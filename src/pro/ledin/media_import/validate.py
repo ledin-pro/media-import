@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import Path
+from typing import Any
+
+from .inventory import sha256_file
+from .manifest import load_manifest, save_manifest
+
+EMBEDDED_WIKILINK = re.compile(r"!\[\[([^\]|#]+)")
+
+
+def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, Any]:
+    manifest_path = output_root / "manifest.json"
+    errors: list[str] = []
+    warnings: list[str] = []
+    try:
+        manifest = load_manifest(manifest_path)
+    except ValueError as exc:
+        return {"status": "failed", "errors": [str(exc)], "warnings": []}
+
+    seen_outputs: set[str] = set()
+    for item in manifest.get("items", []):
+        source_path = str(item.get("source_path", ""))
+        output_path = item.get("output_path")
+        item_status = item.get("status")
+        if item_status in {"failed", "conflict"}:
+            errors.append(f"{item_status}: {source_path}")
+            continue
+        if item_status in {"partial", "unsupported"}:
+            warnings.append(f"{item_status}: {source_path}")
+        if item_status in {"unsupported", "duplicate", "reused", "removed"}:
+            continue
+        if not output_path:
+            warnings.append(f"No output artifact recorded for {source_path}")
+            continue
+        if output_path in seen_outputs:
+            errors.append(f"Duplicate output path: {output_path}")
+            continue
+        seen_outputs.add(str(output_path))
+        artifact = (output_root / str(output_path)).resolve()
+        try:
+            artifact.relative_to(output_root.resolve())
+        except ValueError:
+            errors.append(f"Output escapes corpus root: {output_path}")
+            continue
+        if not artifact.exists():
+            errors.append(f"Missing output artifact: {output_path}")
+            continue
+        content = artifact.read_text(encoding="utf-8", errors="replace")
+        if not content.startswith("---\n") or 'importer: "media-import"' not in content:
+            errors.append(f"Invalid media-import frontmatter: {output_path}")
+        expected_hash = item.get("output_sha256")
+        actual_hash = sha256_file(artifact)
+        if expected_hash and expected_hash != actual_hash:
+            errors.append(f"Owned output was modified: {output_path}")
+        for link in EMBEDDED_WIKILINK.findall(content):
+            target = (output_root / link).resolve()
+            if not target.is_relative_to(output_root.resolve()) or not target.exists():
+                errors.append(f"Broken embedded asset in {output_path}: {link}")
+
+    for required in ("index.md", "catalog.md"):
+        if not (output_root / required).exists():
+            errors.append(f"Missing corpus index: {required}")
+
+    if source is not None and source.exists():
+        source_root = source if source.is_dir() else source.parent
+        for item in manifest.get("items", []):
+            expected = item.get("source_sha256")
+            relative = item.get("source_path")
+            if not expected or not relative:
+                continue
+            if "!/" in str(relative):
+                continue
+            candidate = source if source.is_file() else source_root / str(relative)
+            if candidate.exists() and sha256_file(candidate) != expected:
+                errors.append(f"Source changed since import: {relative}")
+
+    status = "failed" if errors else "warning" if warnings else "clean"
+    manifest["validation"] = {"status": status, "errors": errors, "warnings": warnings}
+    save_manifest(manifest_path, manifest, output_root)
+    return {"status": status, "errors": errors, "warnings": warnings}
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
