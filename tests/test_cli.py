@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from pro.ledin.media_import import cli
@@ -27,7 +28,9 @@ def test_dry_run_does_not_create_vault_files(tmp_path: Path, monkeypatch, capsys
     )
     assert result == 0
     assert not vault.exists()
-    assert '"dry_run": true' in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["dry_run"] is True
+    assert "phase=inventory" in captured.err
 
 
 def test_real_import_requires_confirmation(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -63,7 +66,7 @@ def test_resume_reuses_unchanged_output_and_removes_owned_stale_file(
     )
     calls = 0
 
-    def fake_process(item, items, resolved_config, output_root):
+    def fake_process(item, items, resolved_config, output_root, progress=None):
         nonlocal calls
         calls += 1
         return (
@@ -114,7 +117,7 @@ def test_cross_format_exact_text_is_deduplicated(tmp_path: Path, monkeypatch) ->
         cache_dir=tmp_path / "cache",
     )
 
-    def fake_process(item, items, resolved_config, output_root):
+    def fake_process(item, items, resolved_config, output_root, progress=None):
         return (
             f'---\nimporter: "media-import"\n---\n\n# {item.source_path}\n\nSame\n',
             {"status": "complete", "errors": [], "content_sha256": "same-hash"},

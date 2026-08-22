@@ -5,6 +5,7 @@ import mimetypes
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .progress import ProgressReporter
 from .sources import ResolvedSource
 
 MEDIA_EXTENSIONS = {
@@ -121,8 +122,10 @@ def _local_item(path: Path, root: Path) -> SourceItem:
     )
 
 
-def inventory(source: ResolvedSource) -> list[SourceItem]:
+def inventory(source: ResolvedSource, progress: ProgressReporter | None = None) -> list[SourceItem]:
     if source.kind == "remote":
+        if progress:
+            progress.emit("inventory", "complete", scope="remote", items=1)
         path = Path(source.display_name)
         return [
             SourceItem(
@@ -139,7 +142,12 @@ def inventory(source: ResolvedSource) -> list[SourceItem]:
         ]
     assert source.local_path is not None
     if source.local_path.is_file():
-        return [_local_item(source.local_path, source.local_path)]
+        if progress:
+            progress.emit("inventory", "start", scope="source", files=1)
+        item = _local_item(source.local_path, source.local_path)
+        if progress:
+            progress.emit("inventory", "complete", scope="source", items=1, hashed=1)
+        return [item]
     paths = [
         path
         for path in source.local_path.rglob("*")
@@ -147,7 +155,22 @@ def inventory(source: ResolvedSource) -> list[SourceItem]:
         and not any(part.startswith(".") for part in path.relative_to(source.local_path).parts)
         and not path.name.startswith("~$")
     ]
-    return [
-        _local_item(path, source.local_path)
-        for path in sorted(paths, key=lambda item: item.as_posix().casefold())
-    ]
+    ordered_paths = sorted(paths, key=lambda item: item.as_posix().casefold())
+    if progress:
+        progress.emit("inventory", "start", scope="source", files=len(ordered_paths))
+    items: list[SourceItem] = []
+    total = len(ordered_paths)
+    for index, path in enumerate(ordered_paths, start=1):
+        items.append(_local_item(path, source.local_path))
+        if progress:
+            progress.periodic(
+                "inventory",
+                "inventory",
+                "progress",
+                current=index,
+                total=total,
+                source=path.relative_to(source.local_path).as_posix(),
+            )
+    if progress:
+        progress.emit("inventory", "complete", scope="source", items=total, hashed=total)
+    return items

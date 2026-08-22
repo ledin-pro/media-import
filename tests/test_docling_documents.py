@@ -1,8 +1,10 @@
+import io
 from pathlib import Path
 from types import SimpleNamespace
 
 from pro.ledin.media_import.config import Config
 from pro.ledin.media_import.docling_documents import _ocr_script, _pandoc
+from pro.ledin.media_import.progress import ProgressReporter
 
 
 def test_pandoc_fallback_uses_argument_list(tmp_path: Path, monkeypatch) -> None:
@@ -64,9 +66,12 @@ def test_ocr_script_routes_image_documents_without_exposing_key(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    result = _ocr_script(source, config)
+    output = io.StringIO()
+    result = _ocr_script(source, config, ProgressReporter(stream=output))
 
     assert result.route == "ocr"
     assert result.document.export_to_markdown() == "# OCR output"
     assert "secret" not in captured["arguments"]
     assert captured["environment"]["OCR_VISION_API_KEY"] == "secret"
+    assert "phase=ocr status=start" in output.getvalue()
+    assert "phase=ocr status=complete" in output.getvalue()

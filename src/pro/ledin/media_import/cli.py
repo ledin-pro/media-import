@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import sys
+import time
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
@@ -23,6 +24,7 @@ from .inventory import SourceItem, inventory, sha256_file
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
 from .markdown import render_document_markdown, render_media_markdown, title_from_path
 from .paths import atomic_write, output_path_for
+from .progress import ProgressReporter
 from .sources import resolve_source
 from .validate import validate_corpus
 from .visual_text import recognize_picture, save_picture
@@ -109,9 +111,14 @@ def _emit(value: dict[str, Any], json_output: bool) -> None:
         print(f"{key}: {json.dumps(item, ensure_ascii=False, sort_keys=True)}")
 
 
-def _inspect(config: Config, *, for_import: bool) -> tuple[dict[str, Any], list[SourceItem]]:
+def _inspect(
+    config: Config,
+    *,
+    for_import: bool,
+    progress: ProgressReporter | None = None,
+) -> tuple[dict[str, Any], list[SourceItem]]:
     source = resolve_source(config.source)
-    items = inventory(source)
+    items = inventory(source, progress)
     diagnostics = run_preflight(config, items, for_import=for_import)
     counts = Counter(item.kind for item in items)
     archive_summaries: dict[str, Any] = {}
@@ -168,7 +175,9 @@ def _inspect_existing_output(config: Config, items: list[SourceItem]) -> dict[st
     }
 
 
-def _expand_archives(items: list[SourceItem], config: Config) -> list[SourceItem]:
+def _expand_archives(
+    items: list[SourceItem], config: Config, progress: ProgressReporter | None = None
+) -> list[SourceItem]:
     expanded: list[SourceItem] = []
     for item in items:
         if item.kind != "archive":
@@ -184,9 +193,13 @@ def _expand_archives(items: list[SourceItem], config: Config) -> list[SourceItem
                 config.cache_dir / "downloads" / f"{identity}{item.extension}",
             )
         destination = config.cache_dir / "archives" / identity
+        if progress:
+            progress.emit("archive", "start", source=item.source_path)
         if not destination.exists():
             extract_archive(archive_path, destination)
-        children = inventory(resolve_source(str(destination)))
+        children = inventory(resolve_source(str(destination)), progress)
+        if progress:
+            progress.emit("archive", "complete", source=item.source_path, items=len(children))
         expanded.extend(
             replace(child, source_path=f"{item.source_path}!/{child.source_path}")
             for child in children
@@ -312,6 +325,7 @@ def _process_item(
     items: list[SourceItem],
     config: Config,
     output_root: Path,
+    progress: ProgressReporter | None = None,
 ) -> tuple[str, dict[str, Any]]:
     title = title_from_path(item.source_path)
     visual_results: dict[str, dict[str, Any]] = {}
@@ -326,18 +340,61 @@ def _process_item(
             events = _vtt_events(vtt.absolute_path)
             status = "complete"
             provider = "existing"
+            if progress:
+                progress.emit(
+                    "transcription",
+                    "complete",
+                    result="reused",
+                    source=item.source_path,
+                    provider=provider,
+                )
         elif config.transcription_provider in {"existing", "off"}:
             events = []
             status = "partial"
             provider = config.transcription_provider
             errors.append("No reusable transcript is available and ASR is disabled")
+            if progress:
+                progress.emit(
+                    "transcription",
+                    "complete",
+                    result="partial",
+                    source=item.source_path,
+                    provider=provider,
+                )
         else:
-            result = convert_media(_source_value(item), config, item.extension)
+            started = time.monotonic()
+            if progress:
+                progress.emit(
+                    "transcription",
+                    "start",
+                    source=item.source_path,
+                    provider=config.transcription_provider,
+                )
+            try:
+                result = convert_media(_source_value(item), config, item.extension)
+            except Exception:
+                if progress:
+                    progress.emit(
+                        "transcription",
+                        "failed",
+                        source=item.source_path,
+                        elapsed=f"{time.monotonic() - started:.1f}s",
+                    )
+                raise
             status, errors = _conversion_status(result)
             document = result.document
             events = list(iter_events(document))
             cache_path = _cache_docling(document, item, config)
             provider = config.transcription_provider
+            if progress:
+                progress.emit(
+                    "transcription",
+                    "complete",
+                    result=status,
+                    source=item.source_path,
+                    provider=provider,
+                    elapsed=f"{time.monotonic() - started:.1f}s",
+                )
             if item.extension in VIDEO_EXTENSIONS:
                 for event in events:
                     if event.kind != "picture":
@@ -361,7 +418,26 @@ def _process_item(
                         )
                         visual["image_path"] = image_relative.as_posix()
                     if config.frame_mode in {"text", "text-and-images"}:
+                        ocr_started = time.monotonic()
+                        if progress:
+                            progress.emit(
+                                "ocr",
+                                "start",
+                                detail=True,
+                                source=item.source_path,
+                                frame=event.event_id,
+                                engine=config.ocr_engine or "default",
+                            )
                         visual.update(recognize_picture(document, event.item, config))
+                        if progress:
+                            progress.emit(
+                                "ocr",
+                                "complete",
+                                detail=True,
+                                source=item.source_path,
+                                frame=event.event_id,
+                                elapsed=f"{time.monotonic() - ocr_started:.1f}s",
+                            )
                     visual_results[event.event_id] = visual
         metadata = _metadata(item, config, status, "media_transcript")
         metadata["transcription_provider"] = provider
@@ -383,10 +459,37 @@ def _process_item(
         return text, details
 
     if item.kind == "document":
-        result = convert_document(_source_value(item), config)
+        started = time.monotonic()
+        if progress:
+            progress.emit(
+                "document",
+                "start",
+                source=item.source_path,
+                engine=config.ocr_engine or "docling",
+            )
+        try:
+            result = convert_document(_source_value(item), config, progress=progress)
+        except Exception:
+            if progress:
+                progress.emit(
+                    "document",
+                    "failed",
+                    source=item.source_path,
+                    elapsed=f"{time.monotonic() - started:.1f}s",
+                )
+            raise
         status, errors = _conversion_status(result)
         cache_path = _cache_docling(result.document, item, config)
         body = export_markdown(result.document)
+        if progress:
+            progress.emit(
+                "document",
+                "complete",
+                result=status,
+                source=item.source_path,
+                route=str(getattr(result, "route", "docling")),
+                elapsed=f"{time.monotonic() - started:.1f}s",
+            )
         return render_document_markdown(
             title=title,
             metadata=_metadata(item, config, status, "document"),
@@ -413,6 +516,9 @@ def _process_item(
                 "errors": [],
                 "events": [event.manifest_dict() for event in events],
             }
+        started = time.monotonic()
+        if progress:
+            progress.emit("document", "start", source=item.source_path, engine="docling")
         document = load_docling_document(item.absolute_path)
         events = list(iter_events(document))
         if any(event.track is not None for event in events):
@@ -436,6 +542,15 @@ def _process_item(
         }
         if not any(event.track is not None for event in events):
             details["content_sha256"] = normalized_text_hash(body)
+        if progress:
+            progress.emit(
+                "document",
+                "complete",
+                result="complete",
+                source=item.source_path,
+                route="docling-import",
+                elapsed=f"{time.monotonic() - started:.1f}s",
+            )
         return text, details
 
     raise ValueError(f"Unsupported source type: {item.kind}")
@@ -497,7 +612,10 @@ def _write_indexes(output_root: Path, records: list[dict[str, Any]]) -> None:
 
 
 def _run_import(
-    config: Config, items: list[SourceItem], managed_kinds: set[str] | None = None
+    config: Config,
+    items: list[SourceItem],
+    managed_kinds: set[str] | None = None,
+    progress: ProgressReporter | None = None,
 ) -> dict[str, Any]:
     output_root = config.output_root
     output_root.mkdir(parents=True, exist_ok=True)
@@ -545,8 +663,20 @@ def _run_import(
         for vtt in [_matching_vtt(media, items)]
         if vtt is not None and config.transcription_policy != "force"
     }
+    if progress:
+        progress.emit("import", "start", items=len(items), output=str(output_root))
 
-    for item in items:
+    total = len(items)
+    for index, item in enumerate(items, start=1):
+        if progress:
+            progress.emit(
+                "item",
+                "start",
+                index=index,
+                total=total,
+                kind=item.kind,
+                source=item.source_path,
+            )
         record: dict[str, Any] = {
             "source_path": item.source_path,
             "source_uri": item.source_uri,
@@ -567,6 +697,15 @@ def _run_import(
             )
             manifest["items"].append(record)
             save_manifest(manifest_path, manifest, output_root)
+            if progress:
+                progress.emit(
+                    "item",
+                    "complete",
+                    index=index,
+                    total=total,
+                    result="duplicate",
+                    source=item.source_path,
+                )
             continue
         if item.source_path in associated_vtt:
             record.update(
@@ -577,6 +716,15 @@ def _run_import(
             )
             manifest["items"].append(record)
             save_manifest(manifest_path, manifest, output_root)
+            if progress:
+                progress.emit(
+                    "item",
+                    "complete",
+                    index=index,
+                    total=total,
+                    result="reused",
+                    source=item.source_path,
+                )
             continue
         if item.kind == "unsupported":
             record.update(
@@ -584,6 +732,15 @@ def _run_import(
             )
             manifest["items"].append(record)
             save_manifest(manifest_path, manifest, output_root)
+            if progress:
+                progress.emit(
+                    "item",
+                    "complete",
+                    index=index,
+                    total=total,
+                    result="unsupported",
+                    source=item.source_path,
+                )
             continue
         try:
             source_hash = item.sha256 or hashlib.sha256(item.source_path.encode()).hexdigest()
@@ -605,6 +762,15 @@ def _run_import(
                 reused["resumed"] = True
                 manifest["items"].append(reused)
                 save_manifest(manifest_path, manifest, output_root)
+                if progress:
+                    progress.emit(
+                        "item",
+                        "complete",
+                        index=index,
+                        total=total,
+                        result="resumed",
+                        source=item.source_path,
+                    )
                 continue
             if (
                 previous
@@ -621,8 +787,17 @@ def _run_import(
                 )
                 manifest["items"].append(record)
                 save_manifest(manifest_path, manifest, output_root)
+                if progress:
+                    progress.emit(
+                        "item",
+                        "complete",
+                        index=index,
+                        total=total,
+                        result="conflict",
+                        source=item.source_path,
+                    )
                 continue
-            text, details = _process_item(item, items, config, output_root)
+            text, details = _process_item(item, items, config, output_root, progress)
             content_hash = details.get("content_sha256")
             if item.kind == "document" and content_hash in content_canonicals:
                 record.update(details)
@@ -634,6 +809,15 @@ def _run_import(
                 )
                 manifest["items"].append(record)
                 save_manifest(manifest_path, manifest, output_root)
+                if progress:
+                    progress.emit(
+                        "item",
+                        "complete",
+                        index=index,
+                        total=total,
+                        result="duplicate",
+                        source=item.source_path,
+                    )
                 continue
             atomic_write(output_path, text, [output_root])
             record.update(details)
@@ -658,8 +842,21 @@ def _run_import(
             record.update({"status": "failed", "errors": [str(exc)]})
         manifest["items"].append(record)
         save_manifest(manifest_path, manifest, output_root)
+        if progress:
+            progress.emit(
+                "item",
+                "complete",
+                index=index,
+                total=total,
+                result=record["status"],
+                source=item.source_path,
+            )
 
     current_sources = {item.source_path for item in items}
+    if progress:
+        progress.emit("stale-cleanup", "start")
+    stale_removed = 0
+    stale_conflicts = 0
     for source_path, previous in old_by_source.items():
         if managed_kinds is not None and previous.get("kind") not in managed_kinds:
             continue
@@ -677,6 +874,7 @@ def _run_import(
         ):
             stale_path.unlink()
             stale_record.update({"status": "removed", "stale": True})
+            stale_removed += 1
         elif stale_path.exists():
             stale_record.update(
                 {
@@ -685,13 +883,29 @@ def _run_import(
                     "errors": ["Stale owned output was modified; refusing to remove"],
                 }
             )
+            stale_conflicts += 1
         else:
             stale_record.update({"status": "removed", "stale": True})
         manifest["items"].append(stale_record)
         save_manifest(manifest_path, manifest, output_root)
+    if progress:
+        progress.emit(
+            "stale-cleanup",
+            "complete",
+            removed=stale_removed,
+            conflicts=stale_conflicts,
+        )
 
+    if progress:
+        progress.emit("indexes", "start")
     _write_indexes(output_root, manifest["items"])
+    if progress:
+        progress.emit("indexes", "complete")
+        progress.emit("validation", "start")
     validation = validate_corpus(output_root, source.local_path)
+    if progress:
+        progress.emit("validation", "complete", result=validation["status"])
+        progress.emit("import", "complete", result=validation["status"])
     return {
         "message": "Import completed",
         "output_dir": str(output_root),
@@ -748,8 +962,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         config = load_config(overrides=_overrides(args), config_path=args.config)
+        progress = ProgressReporter(verbose=config.verbose)
         only = _parse_only(args.only) if args.command == "import" else set()
-        inspection, items = _inspect(config, for_import=False)
+        inspection, items = _inspect(config, for_import=False, progress=progress)
         if args.command == "inspect" or args.dry_run:
             inspection["dry_run"] = args.command == "import"
             if args.command == "import":
@@ -762,7 +977,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = _refresh_indexes(config)
             _emit(result, args.json_output)
             return 0 if result["validation"]["status"] == "clean" else 1
-        items = _expand_archives(items, config)
+        items = _expand_archives(items, config, progress)
         managed_kinds: set[str] = set()
         if "media" in only:
             managed_kinds.add("media")
@@ -776,7 +991,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.json_output,
             )
             return 3
-        result = _run_import(config, items, managed_kinds)
+        result = _run_import(config, items, managed_kinds, progress)
         _emit(result, args.json_output)
         validation_status = result["validation"]["status"]
         code = 2 if validation_status == "failed" else 1 if validation_status == "warning" else 0

@@ -5,12 +5,14 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .config import Config
 from .office_security import inspect_office_package
+from .progress import ProgressReporter
 
 
 class DoclingDocumentError(RuntimeError):
@@ -90,7 +92,9 @@ def _fallback(source: Path, config: Config, cause: Exception) -> FallbackResult:
     raise DoclingDocumentError("; ".join(errors)) from cause
 
 
-def _ocr_script(source: Path, config: Config) -> FallbackResult:
+def _ocr_script(
+    source: Path, config: Config, progress: ProgressReporter | None = None
+) -> FallbackResult:
     executable = shutil.which("ocr")
     if executable is None:
         raise DoclingDocumentError("OCR CLI is not installed")
@@ -117,6 +121,14 @@ def _ocr_script(source: Path, config: Config) -> FallbackResult:
 
     with tempfile.TemporaryDirectory(prefix="media-import-ocr-") as output_dir:
         command.extend(["--out", output_dir])
+        started = time.monotonic()
+        if progress:
+            progress.emit(
+                "ocr",
+                "start",
+                source=str(source),
+                engine=engine,
+            )
         completed = subprocess.run(
             command,
             check=False,
@@ -128,18 +140,46 @@ def _ocr_script(source: Path, config: Config) -> FallbackResult:
         markdown_path = Path(output_dir) / f"{source.stem}.md"
         if completed.returncode != 0 or not markdown_path.exists():
             detail = (completed.stderr or completed.stdout or "OCR returned no output").strip()
+            if progress:
+                progress.emit(
+                    "ocr",
+                    "failed",
+                    source=str(source),
+                    engine=engine,
+                    elapsed=f"{time.monotonic() - started:.1f}s",
+                )
             raise DoclingDocumentError(f"OCR CLI failed: {detail}")
         markdown = markdown_path.read_text(encoding="utf-8", errors="replace").strip()
         if not markdown:
+            if progress:
+                progress.emit(
+                    "ocr",
+                    "failed",
+                    source=str(source),
+                    engine=engine,
+                    elapsed=f"{time.monotonic() - started:.1f}s",
+                )
             raise DoclingDocumentError("OCR CLI returned empty output")
+        if progress:
+            progress.emit(
+                "ocr",
+                "complete",
+                source=str(source),
+                engine=engine,
+                elapsed=f"{time.monotonic() - started:.1f}s",
+            )
         return FallbackResult(FallbackDocument(markdown, "ocr"), "ocr")
 
 
-def convert_document(source: Path | str, config: Config) -> Any:
+def convert_document(
+    source: Path | str,
+    config: Config,
+    progress: ProgressReporter | None = None,
+) -> Any:
     from docling.document_converter import DocumentConverter
 
     if isinstance(source, Path) and source.suffix.casefold() in OCR_DOCUMENT_EXTENSIONS:
-        return _ocr_script(source, config)
+        return _ocr_script(source, config, progress)
     if isinstance(source, Path) and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}:
         inspect_office_package(source)
     converter = DocumentConverter()

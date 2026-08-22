@@ -66,6 +66,10 @@ External processing is approved by default. Never expose API keys in commands,
 logs, or manifests. Never edit unrelated project notes unless the user separately
 asks for a link to the imported corpus.
 
+Import progress is written to stderr so `--json` stdout remains valid JSON. A
+confirmed import emits phase and per-item progress by default; add `--verbose`
+for more frequent inventory and OCR/ASR details.
+
 ## Defaults
 
 - Mirror the source hierarchy.

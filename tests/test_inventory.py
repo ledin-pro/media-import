@@ -1,7 +1,9 @@
+import io
 from pathlib import Path
 
 from pro.ledin.media_import.dedupe import exact_duplicate_groups
 from pro.ledin.media_import.inventory import inventory
+from pro.ledin.media_import.progress import ProgressReporter
 from pro.ledin.media_import.sources import resolve_source
 
 
@@ -25,3 +27,17 @@ def test_inventory_detects_canonical_docling_json(tmp_path: Path) -> None:
     )
     items = inventory(resolve_source(str(export)))
     assert items[0].kind == "docling"
+
+
+def test_inventory_reports_hashing_progress(tmp_path: Path) -> None:
+    (tmp_path / "a.mp3").write_bytes(b"audio")
+    (tmp_path / "b.pdf").write_bytes(b"document")
+    output = io.StringIO()
+    progress = ProgressReporter(stream=output, verbose=True)
+
+    inventory(resolve_source(str(tmp_path)), progress)
+
+    text = output.getvalue()
+    assert "phase=inventory status=start" in text
+    assert "phase=inventory status=progress current=1 total=2" in text
+    assert "phase=inventory status=complete" in text
