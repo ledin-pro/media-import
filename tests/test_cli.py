@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from pro.ledin.media_import import cli
 from pro.ledin.media_import.config import Config
@@ -126,6 +127,24 @@ def test_cross_format_exact_text_is_deduplicated(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(cli, "_process_item", fake_process)
     result = cli._run_import(config, inventory(resolve_source(str(source))))
     assert result["counts"] == {"complete": 1, "duplicate": 1}
+
+
+def test_video_docling_cache_excludes_embedded_images(tmp_path: Path) -> None:
+    captured = {}
+
+    class Document:
+        def model_dump(self, **kwargs):
+            captured.update(kwargs)
+            return {"pictures": [{"self_ref": "#/pictures/0"}]}
+
+    item = SimpleNamespace(sha256="abc", source_path="video.mp4")
+    config = SimpleNamespace(cache_dir=tmp_path)
+
+    path = cli._cache_docling(Document(), item, config, exclude_images=True)
+
+    assert path == str(tmp_path / "docling/abc.json")
+    assert captured["exclude"] == {"pictures": {"__all__": {"image"}}}
+    assert "data:image" not in Path(path).read_text(encoding="utf-8")
 
 
 def test_mapped_layout_uses_longest_matching_prefix(tmp_path: Path) -> None:

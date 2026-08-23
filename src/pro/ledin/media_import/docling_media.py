@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -10,6 +11,10 @@ from .config import Config
 
 class DoclingMediaError(RuntimeError):
     """Raised when Docling cannot convert a media source."""
+
+
+_MEDIA_CONVERTERS: dict[tuple[object, ...], Any] = {}
+_MAX_MEDIA_CONVERTERS = 4
 
 
 def _prepare_huggingface_cache(config: Config) -> None:
@@ -63,8 +68,19 @@ def _accelerator(config: Config) -> Any:
         return AcceleratorOptions(device=device)
 
 
-def convert_media(source: Path | str, config: Config, extension: str) -> Any:
-    _prepare_huggingface_cache(config)
+def _converter_key(config: Config, extension: str) -> tuple[object, ...]:
+    return (
+        extension.casefold() in {".avi", ".mkv", ".mov", ".mp4", ".webm"},
+        config.transcription_model,
+        config.transcription_provider,
+        config.transcription_language,
+        config.transcription_timeout_seconds,
+        config.docling_device,
+        str(config.docling_artifacts_path or ""),
+    )
+
+
+def _build_media_converter(config: Config, extension: str) -> Any:
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import AsrPipelineOptions, VideoPipelineOptions
     from docling.document_converter import AudioFormatOption, DocumentConverter, VideoFormatOption
@@ -83,7 +99,7 @@ def convert_media(source: Path | str, config: Config, extension: str) -> Any:
             frame_sampling_mode=VideoFrameSamplingMode.SCENE_CHANGE,
             cuts_per_minute=2.0,
             max_sampled_frames=40,
-            generate_frame_images=True,
+            generate_frame_images=config.frame_mode != "none",
             enable_diarization=False,
             asr_options=asr_options,
             **common,
@@ -101,6 +117,34 @@ def convert_media(source: Path | str, config: Config, extension: str) -> Any:
                 )
             }
         )
+    return converter
+
+
+def _get_media_converter(config: Config, extension: str) -> Any:
+    key = _converter_key(config, extension)
+    converter = _MEDIA_CONVERTERS.get(key)
+    if converter is None:
+        _prepare_huggingface_cache(config)
+        if len(_MEDIA_CONVERTERS) >= _MAX_MEDIA_CONVERTERS:
+            _MEDIA_CONVERTERS.pop(next(iter(_MEDIA_CONVERTERS)))
+        converter = _build_media_converter(config, extension)
+        _MEDIA_CONVERTERS[key] = converter
+    return converter
+
+
+def release_media_memory() -> None:
+    """Release temporary Python and accelerator allocations between items."""
+    gc.collect()
+    try:
+        import mlx.core as mx
+
+        mx.clear_cache()
+    except (ImportError, AttributeError):
+        pass
+
+
+def convert_media(source: Path | str, config: Config, extension: str) -> Any:
+    converter = _get_media_converter(config, extension)
     try:
         result = converter.convert(source)
     except Exception as exc:  # Docling exposes backend-specific exceptions.

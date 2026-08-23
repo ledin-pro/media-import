@@ -18,7 +18,7 @@ from .dedupe import exact_duplicate_groups, normalized_text_hash
 from .docling_adapter import DocumentEvent, Track, iter_events
 from .docling_documents import convert_document, export_markdown
 from .docling_imports import load_docling_document
-from .docling_media import convert_media
+from .docling_media import convert_media, release_media_memory
 from .environment import has_errors, run_preflight
 from .inventory import SourceItem, inventory, sha256_file
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
@@ -309,11 +309,26 @@ def _conversion_status(result: Any) -> tuple[str, list[str]]:
     return "complete", errors
 
 
-def _cache_docling(document: Any, item: SourceItem, config: Config) -> str | None:
+def _cache_docling(
+    document: Any,
+    item: SourceItem,
+    config: Config,
+    *,
+    exclude_images: bool = False,
+) -> str | None:
     identity = item.sha256 or hashlib.sha256(item.source_path.encode()).hexdigest()
     path = config.cache_dir / "docling" / f"{identity}.json"
     try:
-        payload = json.dumps(document.export_to_dict(), ensure_ascii=False, sort_keys=True)
+        if exclude_images and hasattr(document, "model_dump"):
+            data = document.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+                exclude={"pictures": {"__all__": {"image"}}},
+            )
+        else:
+            data = document.export_to_dict()
+        payload = json.dumps(data, ensure_ascii=False, sort_keys=True)
     except Exception:
         return None
     atomic_write(path, payload + "\n", [config.cache_dir])
@@ -384,7 +399,12 @@ def _process_item(
             status, errors = _conversion_status(result)
             document = result.document
             events = list(iter_events(document))
-            cache_path = _cache_docling(document, item, config)
+            cache_path = _cache_docling(
+                document,
+                item,
+                config,
+                exclude_images=item.extension in VIDEO_EXTENSIONS,
+            )
             provider = config.transcription_provider
             if progress:
                 progress.emit(
@@ -797,7 +817,11 @@ def _run_import(
                         source=item.source_path,
                     )
                 continue
-            text, details = _process_item(item, items, config, output_root, progress)
+            try:
+                text, details = _process_item(item, items, config, output_root, progress)
+            finally:
+                if item.kind == "media":
+                    release_media_memory()
             content_hash = details.get("content_sha256")
             if item.kind == "document" and content_hash in content_canonicals:
                 record.update(details)
