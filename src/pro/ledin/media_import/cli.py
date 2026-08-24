@@ -14,6 +14,7 @@ from typing import Any
 
 from .archives import download_archive, extract_archive, inspect_archive
 from .config import Config, ConfigError, load_config
+from .conflicts import analyze_conflicts, build_output_plan, normalized_output_path
 from .dedupe import exact_duplicate_groups, normalized_text_hash
 from .docling_adapter import DocumentEvent, Track, iter_events
 from .docling_documents import convert_document, export_markdown
@@ -24,8 +25,10 @@ from .inventory import SourceItem, inventory, sha256_file
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
 from .markdown import render_document_markdown, render_media_markdown, title_from_path
 from .paths import atomic_write, output_path_for
+from .pdf_preflight import PdfPasswordRequired, inspect_pdf_encryption
 from .progress import ProgressReporter
 from .sources import resolve_source
+from .transcript_compare import compare_transcripts
 from .validate import validate_corpus
 from .visual_text import recognize_picture, save_picture
 
@@ -68,6 +71,7 @@ def _parser() -> argparse.ArgumentParser:
             child.add_argument("--resume", action="store_true")
             child.add_argument("--fail-on-warning", action="store_true")
             child.add_argument("--only", default="media,documents,indexes")
+            child.add_argument("--conflict-decisions", type=Path)
 
     validate = subparsers.add_parser("validate")
     validate.add_argument("--output-dir", type=Path, required=True)
@@ -77,6 +81,10 @@ def _parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status")
     status.add_argument("--output-dir", type=Path, required=True)
     status.add_argument("--json", action="store_true", dest="json_output")
+    compare = subparsers.add_parser("compare-transcripts")
+    compare.add_argument("canonical", type=Path)
+    compare.add_argument("variant", type=Path)
+    compare.add_argument("--json", action="store_true", dest="json_output")
     return parser
 
 
@@ -121,6 +129,29 @@ def _inspect(
     items = inventory(source, progress)
     diagnostics = run_preflight(config, items, for_import=for_import)
     counts = Counter(item.kind for item in items)
+    candidate_paths = {
+        item.source_path: normalized_output_path(_output_source_path(item, config))
+        for item in items
+    }
+    manifest: dict[str, Any] | None = None
+    manifest_path = config.output_root / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = load_manifest(manifest_path)
+        except ValueError:
+            manifest = None
+    pdf_preflight = {
+        item.source_path: inspect_pdf_encryption(item.absolute_path)
+        for item in items
+        if item.extension == ".pdf" and item.absolute_path is not None
+    }
+    associated_vtt = {
+        vtt.source_path
+        for media in items
+        if media.kind == "media"
+        for vtt in [_matching_vtt(media, items)]
+        if vtt is not None and config.transcription_policy != "force"
+    }
     archive_summaries: dict[str, Any] = {}
     for item in items:
         if item.kind == "archive" and item.absolute_path:
@@ -143,8 +174,30 @@ def _inspect(
         "diagnostics": [item.public_dict() for item in diagnostics],
         "would_write": ["index.md", "catalog.md", "manifest.json"],
         "existing_output": _inspect_existing_output(config, items),
+        "conflict_groups": analyze_conflicts(
+            items,
+            candidate_paths,
+            existing_manifest=manifest,
+            output_root=config.output_root,
+            ignored_sources=associated_vtt,
+        ),
+        "pdf_preflight": pdf_preflight,
     }
     return result, items
+
+
+def _load_conflict_decisions(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"Invalid conflict decisions file: {exc}") from exc
+    if not isinstance(data, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in data.items()
+    ):
+        raise ConfigError("Conflict decisions must be a JSON object of output path to source path")
+    return data
 
 
 def _inspect_existing_output(config: Config, items: list[SourceItem]) -> dict[str, Any]:
@@ -638,8 +691,40 @@ def _run_import(
     items: list[SourceItem],
     managed_kinds: set[str] | None = None,
     progress: ProgressReporter | None = None,
+    conflict_decisions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     output_root = config.output_root
+    duplicate_groups = exact_duplicate_groups(items)
+    duplicate_aliases = {
+        alias: group["canonical"]
+        for group in duplicate_groups
+        for alias in group.get("aliases", [])
+    }
+    associated_vtt = {
+        vtt.source_path: media.source_path
+        for media in items
+        if media.kind == "media"
+        for vtt in [_matching_vtt(media, items)]
+        if vtt is not None and config.transcription_policy != "force"
+    }
+    candidate_paths = {
+        item.source_path: normalized_output_path(_output_source_path(item, config))
+        for item in items
+    }
+    planned_outputs, selected_aliases, unresolved = build_output_plan(
+        items,
+        candidate_paths,
+        conflict_decisions or {},
+        {**duplicate_aliases, **associated_vtt},
+    )
+    if unresolved:
+        names = ", ".join(unresolved)
+        raise ConfigError(
+            "Unresolved same-basename media conflicts; provide --conflict-decisions: "
+            f"{names}"
+        )
+    duplicate_aliases.update(selected_aliases)
+
     output_root.mkdir(parents=True, exist_ok=True)
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_root / "manifest.json"
@@ -667,23 +752,11 @@ def _run_import(
             for item in old_by_source.values()
             if item.get("kind") not in managed_kinds and not item.get("stale")
         )
-    manifest["duplicates"] = exact_duplicate_groups(items)
+    manifest["duplicates"] = duplicate_groups
     content_canonicals = {
         str(item["content_sha256"]): str(item.get("output_path", ""))
         for item in old_by_source.values()
         if item.get("status") == "complete" and item.get("content_sha256")
-    }
-    duplicate_aliases = {
-        alias: group["canonical"]
-        for group in manifest["duplicates"]
-        for alias in group.get("aliases", [])
-    }
-    associated_vtt = {
-        vtt.source_path: media.source_path
-        for media in items
-        if media.kind == "media"
-        for vtt in [_matching_vtt(media, items)]
-        if vtt is not None and config.transcription_policy != "force"
     }
     if progress:
         progress.emit("import", "start", items=len(items), output=str(output_root))
@@ -766,9 +839,13 @@ def _run_import(
             continue
         try:
             source_hash = item.sha256 or hashlib.sha256(item.source_path.encode()).hexdigest()
-            output_path = output_path_for(
-                _output_source_path(item, config), output_root, source_hash
-            )
+            planned_relative = planned_outputs[item.source_path]
+            if planned_relative == candidate_paths[item.source_path]:
+                output_path = output_path_for(
+                    _output_source_path(item, config), output_root, source_hash
+                )
+            else:
+                output_path = output_path_for(planned_relative, output_root, source_hash)
             relative_output = output_path.relative_to(output_root).as_posix()
             previous = old_by_source.get(item.source_path)
             if (
@@ -864,6 +941,8 @@ def _run_import(
             )
             if content_hash:
                 content_canonicals[str(content_hash)] = relative_output
+        except PdfPasswordRequired as exc:
+            record.update({"status": "blocked", "errors": [str(exc)]})
         except Exception as exc:
             record.update({"status": "failed", "errors": [str(exc)]})
         manifest["items"].append(record)
@@ -986,15 +1065,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             _emit(result, args.json_output)
             return 0
+        if args.command == "compare-transcripts":
+            result = compare_transcripts(args.canonical, args.variant)
+            _emit(result, args.json_output)
+            return 0
 
         config = load_config(overrides=_overrides(args), config_path=args.config)
         progress = ProgressReporter(verbose=config.verbose)
         only = _parse_only(args.only) if args.command == "import" else set()
-        inspection, items = _inspect(config, for_import=False, progress=progress)
+        inspection, items = _inspect(
+            config,
+            for_import=False,
+            progress=progress,
+        )
         if args.command == "inspect" or args.dry_run:
             inspection["dry_run"] = args.command == "import"
             if args.command == "import":
                 inspection["only"] = sorted(only)
+                decisions = _load_conflict_decisions(args.conflict_decisions)
+                duplicates = exact_duplicate_groups(items)
+                duplicate_aliases = {
+                    alias: group["canonical"]
+                    for group in duplicates
+                    for alias in group.get("aliases", [])
+                }
+                associated_vtt = {
+                    vtt.source_path: media.source_path
+                    for media in items
+                    if media.kind == "media"
+                    for vtt in [_matching_vtt(media, items)]
+                    if vtt is not None and config.transcription_policy != "force"
+                }
+                candidates = {
+                    item.source_path: normalized_output_path(_output_source_path(item, config))
+                    for item in items
+                }
+                _, _, unresolved = build_output_plan(
+                    items,
+                    candidates,
+                    decisions,
+                    {**duplicate_aliases, **associated_vtt},
+                )
+                inspection["unresolved_conflicts"] = unresolved
             _emit(inspection, args.json_output)
             return 3 if any(item["level"] == "error" for item in inspection["diagnostics"]) else 0
         if not args.confirmed:
@@ -1017,7 +1129,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.json_output,
             )
             return 3
-        result = _run_import(config, items, managed_kinds, progress)
+        decisions = _load_conflict_decisions(args.conflict_decisions)
+        result = _run_import(config, items, managed_kinds, progress, decisions)
         _emit(result, args.json_output)
         validation_status = result["validation"]["status"]
         code = 2 if validation_status == "failed" else 1 if validation_status == "warning" else 0

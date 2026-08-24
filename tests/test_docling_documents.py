@@ -56,7 +56,10 @@ def test_ocr_script_routes_image_documents_without_exposing_key(
     )
     captured = {}
 
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/ocr")
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name: f"/usr/local/bin/{name}" if name in {"ocr", "qpdf"} else None,
+    )
 
     def fake_run(arguments, **kwargs):
         captured["arguments"] = arguments
@@ -71,6 +74,8 @@ def test_ocr_script_routes_image_documents_without_exposing_key(
 
     assert result.route == "ocr"
     assert result.document.export_to_markdown() == "# OCR output"
+    assert captured["arguments"][0].endswith("/ocr")
+    assert "--decrypt" not in captured["arguments"]
     assert "secret" not in captured["arguments"]
     assert captured["environment"]["OCR_VISION_API_KEY"] == "secret"
     assert "phase=ocr status=start" in output.getvalue()

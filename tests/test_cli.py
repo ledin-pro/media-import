@@ -2,10 +2,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from pro.ledin.media_import import cli
-from pro.ledin.media_import.config import Config
+from pro.ledin.media_import.config import Config, ConfigError
 from pro.ledin.media_import.inventory import SourceItem, inventory
 from pro.ledin.media_import.manifest import load_manifest
+from pro.ledin.media_import.pdf_preflight import PdfPasswordRequired
 from pro.ledin.media_import.sources import resolve_source
 
 
@@ -205,6 +208,20 @@ def test_cli_accepts_gigaam_provider() -> None:
     assert args.transcription_provider == "gigaam"
 
 
+def test_compare_transcripts_subcommand_emits_json(tmp_path: Path, capsys) -> None:
+    canonical = tmp_path / "canonical.md"
+    variant = tmp_path / "variant.md"
+    canonical.write_text("one two three " * 10, encoding="utf-8")
+    variant.write_text("one two three " * 10, encoding="utf-8")
+
+    result = cli.main(
+        ["compare-transcripts", str(canonical), str(variant), "--json"]
+    )
+
+    assert result == 0
+    assert json.loads(capsys.readouterr().out)["label"] == "full-equivalent"
+
+
 def test_manifest_records_transcription_provider_and_model(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "source.wav"
     source.write_bytes(b"audio")
@@ -235,3 +252,103 @@ def test_manifest_records_transcription_provider_and_model(tmp_path: Path, monke
     assert manifest["config"]["transcription_model"] == "v3_e2e_rnnt"
     assert manifest["items"][0]["transcription_provider"] == "gigaam"
     assert manifest["items"][0]["transcription_model"] == "v3_e2e_rnnt"
+
+
+def test_same_basename_media_requires_decision_before_writing(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "lesson.mp3").write_bytes(b"audio")
+    (source / "lesson.mov").write_bytes(b"video")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+
+    with pytest.raises(ConfigError, match="Unresolved same-basename"):
+        cli._run_import(config, inventory(resolve_source(str(source))))
+
+    assert not config.output_root.exists()
+
+
+def test_decision_selects_canonical_and_marks_other_media_duplicate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "lesson.mp3").write_bytes(b"audio")
+    (source / "lesson.mov").write_bytes(b"video")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda item, items, resolved_config, output_root, progress=None: (
+            '---\nimporter: "media-import"\n---\n\nTranscript\n',
+            {"status": "complete", "errors": []},
+        ),
+    )
+
+    items = inventory(resolve_source(str(source)))
+    cli._run_import(config, items, conflict_decisions={"lesson.md": "lesson.mov"})
+    manifest = load_manifest(config.output_root / "manifest.json")
+    records = {item["source_path"]: item for item in manifest["items"]}
+
+    assert records["lesson.mov"]["status"] == "complete"
+    assert records["lesson.mp3"]["status"] == "duplicate"
+    assert records["lesson.mp3"]["canonical_source_path"] == "lesson.mov"
+    assert (config.output_root / "lesson.md").exists()
+
+
+def test_mixed_type_collision_gets_separate_paths(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "lesson.mov").write_bytes(b"video")
+    (source / "lesson.pdf").write_bytes(b"document")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda item, items, resolved_config, output_root, progress=None: (
+            '---\nimporter: "media-import"\n---\n\nContent\n',
+            {"status": "complete", "errors": []},
+        ),
+    )
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    manifest = load_manifest(config.output_root / "manifest.json")
+    paths = {item["output_path"] for item in manifest["items"]}
+
+    assert len(paths) == 2
+    assert all(path.startswith("lesson-") for path in paths)
+
+
+def test_password_protected_pdf_is_recorded_as_blocked(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "locked.pdf"
+    source.write_bytes(b"pdf")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda *args, **kwargs: (_ for _ in ()).throw(PdfPasswordRequired("unlocked copy")),
+    )
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    manifest = load_manifest(config.output_root / "manifest.json")
+
+    assert manifest["items"][0]["status"] == "blocked"

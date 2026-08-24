@@ -28,9 +28,9 @@ def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, 
         if item_status in {"failed", "conflict"}:
             errors.append(f"{item_status}: {source_path}")
             continue
-        if item_status in {"partial", "unsupported"}:
+        if item_status in {"blocked", "partial", "unsupported"}:
             warnings.append(f"{item_status}: {source_path}")
-        if item_status in {"unsupported", "duplicate", "reused", "removed"}:
+        if item_status in {"blocked", "unsupported", "duplicate", "reused", "removed"}:
             continue
         if not output_path:
             warnings.append(f"No output artifact recorded for {source_path}")

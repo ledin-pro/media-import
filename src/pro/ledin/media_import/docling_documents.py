@@ -12,6 +12,7 @@ from typing import Any
 
 from .config import Config
 from .office_security import inspect_office_package
+from .pdf_preflight import PdfPasswordRequired, decrypted_pdf, inspect_pdf_encryption
 from .progress import ProgressReporter
 
 
@@ -129,14 +130,22 @@ def _ocr_script(
                 source=str(source),
                 engine=engine,
             )
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=config.ocr_timeout_seconds,
-            env=environment,
-        )
+        if source.suffix.casefold() == ".pdf":
+            pdf_status = inspect_pdf_encryption(source)["status"]
+            if pdf_status == "password-required":
+                raise PdfPasswordRequired(
+                    "PDF is password-protected; provide an unlocked copy"
+                )
+        with decrypted_pdf(source) as ocr_source:
+            command[1] = str(ocr_source)
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=config.ocr_timeout_seconds,
+                env=environment,
+            )
         markdown_path = Path(output_dir) / f"{source.stem}.md"
         if completed.returncode != 0 or not markdown_path.exists():
             detail = (completed.stderr or completed.stdout or "OCR returned no output").strip()

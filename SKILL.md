@@ -51,10 +51,11 @@ working CLI and the required `ffmpeg`/`ffprobe` executables for audio or video.
 2. Determine the vault root and propose a relative output directory.
 3. When source and destination are available, run `media-import inspect ... --json`
    before asking policy questions. Inspection is read-only and exposes the choices
-   that are actually unresolved.
-4. Reuse supplied values and the defaults below. Ask one consolidated question
-   only when inspection reveals a real ambiguity, conflict, missing OCR policy,
-   or need for external processing. Do not ask the user to reconfirm defaults.
+   that are actually unresolved, including `conflict_groups` and `pdf_preflight`.
+4. Reuse supplied values and the defaults below. When inspection finds duplicate
+   media candidates, compare transcripts only as needed and ask one consolidated
+   batch question naming the canonical source for every group. Do not choose a
+   canonical recording automatically.
 5. Run `media-import import ... --dry-run --json` and show the exact routes,
    counts, conflicts, and missing dependencies.
 6. Wait for confirmation before running a real import with `--confirmed`.
@@ -71,6 +72,16 @@ External processing is approved by default. Never expose API keys in commands,
 logs, or manifests. Never edit unrelated project notes unless the user separately
 asks for a link to the imported corpus.
 
+The skill orchestrates decisions; `inspect` performs collision grouping, ffprobe
+metadata, and PDF preflight. Use `media-import compare-transcripts A B --json`
+for two already-produced transcripts. Do not edit the manifest by hand or use
+`--force` to resolve output collisions.
+
+For every unresolved same-basename media group, ask one batch question and write
+a JSON object mapping the reported `output_path` to the chosen `source_path`.
+Pass it with `--conflict-decisions FILE`. Mixed media/document collisions are
+separated automatically with stable format/hash suffixes.
+
 Import progress is written to stderr so `--json` stdout remains valid JSON. A
 confirmed import emits phase and per-item progress by default; add `--verbose`
 for more frequent inventory and OCR/ASR details.
@@ -80,6 +91,8 @@ for more frequent inventory and OCR/ASR details.
 - Mirror the source hierarchy.
 - Reference original assets instead of copying them.
 - Use `frame_mode=text`: recognize sampled frame text but do not retain frame images.
+- Use `frame_mode=none` when importing speech transcripts without sampled video-frame OCR.
+- Route PDF and image documents through the `ocr` CLI.
 - Auto-detect spoken and OCR languages.
 - Prefer a validated existing transcript; otherwise use Docling Whisper Turbo.
 - Keep Whisper Turbo as the default; select provider `gigaam` only for Russian media.
@@ -87,6 +100,9 @@ for more frequent inventory and OCR/ASR details.
 - On Apple Silicon, Docling's auto preset selects MLX Whisper.
 - Keep timestamps in the manifest, not in visible Markdown.
 - Keep speech and visual text in Docling's chronological item order.
+- Treat `full-equivalent` and `partial-variant` transcript matches as evidence,
+  not as permission to merge. Ask the user in one batch question which source is
+  canonical; the importer records the other media sources as duplicates.
 
 ## Privacy
 
@@ -98,6 +114,7 @@ transcription endpoint. Never expose API keys in commands, logs, or manifests.
 ## References
 
 - Read `references/routing.md` for decisions, CLI commands, and failure routing.
+- Read `references/conflicts.md` for collision groups, transcript comparison, and encrypted-PDF handling.
 - Read `references/output-schema.md` before changing generated Markdown or manifests.
 - Read `references/docling-media.md` for ASR, video sampling, and chronology rules.
 - Read `references/office-conversion.md` for document routes and safety checks.
