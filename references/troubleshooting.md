@@ -20,6 +20,22 @@ also requires the API key and model; external processing is approved by default.
 Use provider `auto` to let Docling select MLX when installed, or `docling-mlx`
 to require it. Forced MLX fails preflight on non-Apple-Silicon systems.
 
+## Missing GigaAM provider
+
+Install `docling-gigaam>=0.1,<0.2` and rerun `inspect`. Development checkouts use
+the sibling `../docling-gigaam` source configured in `pyproject.toml`. Preflight
+checks package and PyTorch runtime availability without importing the provider or
+downloading a model.
+
+GigaAM v3 transcribes Russian only. Use `auto`, `ru`, `rus`, or `russian`; other
+explicit languages are rejected during configuration. The first confirmed
+conversion downloads the checksum-verified official model into the media-import
+cache. Long recordings use local Silero processing and no API token is required.
+
+On Apple Silicon, `MEDIA_IMPORT_DOCLING_DEVICE=mps` is allowed with a warning:
+unsupported GigaAM or Silero operations may execute on CPU. The `mlx` device is
+not supported by this provider.
+
 ## Modified output conflict
 
 The importer does not overwrite an owned artifact whose hash differs from the

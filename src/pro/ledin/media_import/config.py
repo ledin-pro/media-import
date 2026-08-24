@@ -13,7 +13,14 @@ class ConfigError(ValueError):
 
 
 OCR_ENGINES = {"tesseract", "easyocr", "paddleocr", "paddleocr-vl-mlx", "vision"}
-TRANSCRIPTION_PROVIDERS = {"auto", "existing", "docling-mlx", "docling-native", "off"}
+TRANSCRIPTION_PROVIDERS = {
+    "auto",
+    "existing",
+    "docling-mlx",
+    "docling-native",
+    "gigaam",
+    "off",
+}
 TRANSCRIPTION_POLICIES = {"prefer-existing", "missing", "force"}
 ASSET_MODES = {"reference", "copy"}
 FRAME_MODES = {"none", "text", "text-and-images", "images"}
@@ -190,6 +197,25 @@ def load_config(
     if provider == "existing" and policy == "force":
         raise ConfigError("provider=existing cannot be combined with policy=force")
 
+    transcription_language = str(
+        values.get("transcription_language", values.get("language", "auto"))
+    )
+    if provider == "gigaam" and transcription_language.casefold() not in {
+        "auto",
+        "ru",
+        "rus",
+        "russian",
+    }:
+        raise ConfigError(
+            "GigaAM v3 supports Russian transcription only; use auto, ru, rus, or russian"
+        )
+    transcription_model = str(
+        values.get(
+            "transcription_model",
+            "v3_e2e_rnnt" if provider == "gigaam" else "whisper_turbo",
+        )
+    )
+
     external_approved = bool(values.get("external_processing_approved", True))
     vision_key = str(values.get("vision_api_key", ""))
     vision_model = str(values.get("vision_model", ""))
@@ -239,10 +265,8 @@ def load_config(
         paddle_vl_server_url=paddle_url,
         paddle_vl_model=paddle_model,
         transcription_provider=provider,
-        transcription_model=str(values.get("transcription_model", "whisper_turbo")),
-        transcription_language=str(
-            values.get("transcription_language", values.get("language", "auto"))
-        ),
+        transcription_model=transcription_model,
+        transcription_language=transcription_language,
         transcription_timeout_seconds=_positive_int(
             values.get("transcription_timeout_seconds"),
             "transcription_timeout_seconds",

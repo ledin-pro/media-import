@@ -1,7 +1,7 @@
 ---
 name: media-import
 description: Use whenever the user wants to import, archive, mirror, convert, transcribe, or make a local path, file URL, HTTP(S) URL, audio file, video file, lecture recording, or directory containing media searchable in an Obsidian-compatible vault or Markdown corpus. Preserve source wording and provenance, extract spoken transcripts and visual text, convert related documents, deduplicate exact content, and build filesystem indexes. Also use for requests phrased simply as import followed by a path or URL when the target is media or a folder containing media.
-compatibility: Requires Python 3.11+, media-import, docling, docling-slim format-video dependencies, and ffmpeg/ffprobe for raw audio or video.
+compatibility: Requires Python 3.11+, media-import, docling, docling-slim format-video dependencies, and ffmpeg/ffprobe for raw audio or video. Optional Russian GigaAM v3 transcription requires docling-gigaam.
 ---
 
 # Media Import
@@ -34,6 +34,11 @@ For local development from the repository:
 uv sync --extra dev
 uv run media-import --help
 ```
+
+For optional local Russian GigaAM v3 transcription, install
+`docling-gigaam>=0.1,<0.2`. It downloads the checksum-verified official model
+into the shared media-import cache on first conversion, uses local Silero for
+long-form audio, and does not require an API token.
 
 If `media-import` is unavailable, report the exact installation command and get
 user approval before installing anything. Do not start an import without a
@@ -77,6 +82,8 @@ for more frequent inventory and OCR/ASR details.
 - Use `frame_mode=text`: recognize sampled frame text but do not retain frame images.
 - Auto-detect spoken and OCR languages.
 - Prefer a validated existing transcript; otherwise use Docling Whisper Turbo.
+- Keep Whisper Turbo as the default; select provider `gigaam` only for Russian media.
+- GigaAM defaults to `v3_e2e_rnnt` and accepts `auto`, `ru`, `rus`, or `russian`.
 - On Apple Silicon, Docling's auto preset selects MLX Whisper.
 - Keep timestamps in the manifest, not in visible Markdown.
 - Keep speech and visual text in Docling's chronological item order.

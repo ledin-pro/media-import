@@ -57,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
         )
         child.add_argument(
             "--transcription-provider",
-            choices=["auto", "existing", "docling-mlx", "docling-native", "off"],
+            choices=["auto", "existing", "docling-mlx", "docling-native", "gigaam", "off"],
         )
         child.add_argument("--jobs", type=int)
         child.add_argument("--json", action="store_true", dest="json_output")
@@ -470,6 +470,8 @@ def _process_item(
         details = {
             "status": status,
             "errors": errors,
+            "transcription_provider": provider,
+            "transcription_model": config.transcription_model,
             "events": [event.manifest_dict() for event in events],
             "frame_count": sum(event.kind == "picture" for event in events),
             "frames_with_text": sum(bool(value.get("text")) for value in visual_results.values()),

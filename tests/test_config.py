@@ -101,3 +101,59 @@ def test_parallel_jobs_are_rejected_until_model_execution_is_safe(tmp_path: Path
             },
             environ={},
         )
+
+
+def test_gigaam_uses_provider_default_model(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+            "transcription_provider": "gigaam",
+        },
+        environ={},
+    )
+    assert config.transcription_model == "v3_e2e_rnnt"
+
+
+def test_gigaam_preserves_explicit_model(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+            "transcription_provider": "gigaam",
+            "transcription_model": "custom-model",
+        },
+        environ={},
+    )
+    assert config.transcription_model == "custom-model"
+
+
+@pytest.mark.parametrize("language", ["auto", "ru", "rus", "russian", "RUSSIAN"])
+def test_gigaam_accepts_russian_languages(tmp_path: Path, language: str) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+            "transcription_provider": "gigaam",
+            "transcription_language": language,
+        },
+        environ={},
+    )
+    assert config.transcription_language == language
+
+
+def test_gigaam_rejects_non_russian_language(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="supports Russian transcription only"):
+        load_config(
+            overrides={
+                "source": str(tmp_path),
+                "vault_root": tmp_path / "vault",
+                "output_dir": "out",
+                "transcription_provider": "gigaam",
+                "transcription_language": "en",
+            },
+            environ={},
+        )

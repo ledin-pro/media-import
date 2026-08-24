@@ -187,3 +187,51 @@ def test_write_indexes_creates_nested_directory_index(tmp_path: Path) -> None:
     nested = (output / "module/index.md").read_text(encoding="utf-8")
     assert "generated_by: media-import-directory-index" in nested
     assert "[[lesson]]" in nested
+
+
+def test_cli_accepts_gigaam_provider() -> None:
+    args = cli._parser().parse_args(
+        [
+            "inspect",
+            "source.wav",
+            "--vault-root",
+            "/tmp/vault",
+            "--output-dir",
+            "corpus",
+            "--transcription-provider",
+            "gigaam",
+        ]
+    )
+    assert args.transcription_provider == "gigaam"
+
+
+def test_manifest_records_transcription_provider_and_model(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"audio")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        transcription_provider="gigaam",
+        transcription_model="v3_e2e_rnnt",
+    )
+
+    def fake_process(item, items, resolved_config, output_root, progress=None):
+        return (
+            '---\nimporter: "media-import"\n---\n\n# Transcript\n',
+            {
+                "status": "complete",
+                "errors": [],
+                "transcription_provider": "gigaam",
+                "transcription_model": "v3_e2e_rnnt",
+            },
+        )
+
+    monkeypatch.setattr(cli, "_process_item", fake_process)
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    manifest = load_manifest(config.output_root / "manifest.json")
+    assert manifest["config"]["transcription_provider"] == "gigaam"
+    assert manifest["config"]["transcription_model"] == "v3_e2e_rnnt"
+    assert manifest["items"][0]["transcription_provider"] == "gigaam"
+    assert manifest["items"][0]["transcription_model"] == "v3_e2e_rnnt"

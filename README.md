@@ -6,6 +6,9 @@ and direct HTTP(S) media URLs into an Obsidian-compatible Markdown corpus.
 Docling is the sole media conversion engine. `pro-ledin-ocr` recognizes visual
 text in sampled video frames and image-based documents when needed.
 
+Whisper Turbo remains the default transcription route. Russian audio and video
+can optionally use the local GigaAM v3 provider supplied by `docling-gigaam`.
+
 ## Install
 
 Install the published package and verify the CLI:
@@ -28,6 +31,13 @@ ffprobe -version
 ```bash
 uv sync --extra dev
 uv run media-import --help
+```
+
+The development configuration resolves `docling-gigaam` from the sibling
+`../docling-gigaam` checkout. Published installations can install it explicitly:
+
+```bash
+python -m pip install 'docling-gigaam>=0.1,<0.2'
 ```
 
 The published `docling` package supplies standard document support, while
@@ -56,3 +66,18 @@ See `config.example.json` and `references/routing.md`.
 
 The canonical environment prefix is `MEDIA_IMPORT_`. Credentials are never
 written to the manifest or included in cache-profile hashes.
+
+To transcribe Russian media with GigaAM v3:
+
+```bash
+MEDIA_IMPORT_TRANSCRIPTION_PROVIDER=gigaam \
+MEDIA_IMPORT_LANGUAGE=ru \
+media-import inspect ./recordings --vault-root ~/vault --output-dir sources/demo
+```
+
+When no transcription model is explicitly configured, provider `gigaam` uses
+`v3_e2e_rnnt`; every other provider keeps the `whisper_turbo` default. GigaAM v3
+accepts `auto`, `ru`, `rus`, or `russian` and rejects other explicit languages.
+The checksum-verified official model downloads into the media-import cache on
+first real conversion. Long recordings use local Silero long-form processing.
+No API token is required.

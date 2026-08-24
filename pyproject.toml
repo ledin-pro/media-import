@@ -12,6 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Michael Ledin" }]
 dependencies = [
   "docling>=2.121,<3",
+  "docling-gigaam>=0.1,<0.2",
   "docling-slim[format-video]>=2.121,<3",
   "pro-ledin-ocr>=0.6.1,<0.7",
   "PyYAML>=6.0",
@@ -56,4 +57,5 @@ packages = ["pro.ledin.media_import"]
 mypy_path = "src"
 
 [tool.uv.sources]
+docling-gigaam = { path = "../docling-gigaam", editable = true }
 pro-ledin-ocr = { path = "../ocr", editable = true }

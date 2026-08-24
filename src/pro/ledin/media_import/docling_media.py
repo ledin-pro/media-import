@@ -82,18 +82,48 @@ def _converter_key(config: Config, extension: str) -> tuple[object, ...]:
 
 def _build_media_converter(config: Config, extension: str) -> Any:
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import AsrPipelineOptions, VideoPipelineOptions
-    from docling.document_converter import AudioFormatOption, DocumentConverter, VideoFormatOption
-    from docling.pipeline.asr_pipeline import AsrPipeline
+    from docling.document_converter import DocumentConverter
     from docling.utils.video_frame_sampling import VideoFrameSamplingMode
 
-    asr_options = _asr_options(config)
     common = {
         "document_timeout": float(config.transcription_timeout_seconds),
         "accelerator_options": _accelerator(config),
         "artifacts_path": config.docling_artifacts_path,
     }
     video_extensions = {".avi", ".mkv", ".mov", ".mp4", ".webm"}
+    if config.transcription_provider == "gigaam":
+        try:
+            from docling_gigaam import GigaAmOptions, audio_format_option, video_format_option
+        except ImportError as exc:
+            raise DoclingMediaError(
+                "The gigaam provider requires docling-gigaam>=0.1,<0.2"
+            ) from exc
+
+        language = config.transcription_language.casefold()
+        options = GigaAmOptions(
+            model_name=config.transcription_model,
+            language="ru" if language != "auto" else "auto",
+            device=config.docling_device,
+        )
+        if extension.casefold() in video_extensions:
+            format_option = video_format_option(
+                options,
+                frame_sampling_mode=VideoFrameSamplingMode.SCENE_CHANGE,
+                cuts_per_minute=2.0,
+                max_sampled_frames=40,
+                generate_frame_images=config.frame_mode != "none",
+                enable_diarization=False,
+                **common,
+            )
+            return DocumentConverter(format_options={InputFormat.VIDEO: format_option})
+        format_option = audio_format_option(options, **common)
+        return DocumentConverter(format_options={InputFormat.AUDIO: format_option})
+
+    from docling.datamodel.pipeline_options import AsrPipelineOptions, VideoPipelineOptions
+    from docling.document_converter import AudioFormatOption, VideoFormatOption
+    from docling.pipeline.asr_pipeline import AsrPipeline
+
+    asr_options = _asr_options(config)
     if extension.casefold() in video_extensions:
         pipeline_options = VideoPipelineOptions(
             frame_sampling_mode=VideoFrameSamplingMode.SCENE_CHANGE,

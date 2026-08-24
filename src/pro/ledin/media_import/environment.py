@@ -77,6 +77,48 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
                 "Apple Silicon",
             )
         )
+    if has_media and config.transcription_provider == "gigaam":
+        if importlib.util.find_spec("docling_gigaam") is None:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "MISSING_DOCLING_GIGAAM",
+                    "Install docling-gigaam>=0.1,<0.2 to use the gigaam provider.",
+                    "docling-gigaam",
+                )
+            )
+        if importlib.util.find_spec("torch") is None:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "MISSING_GIGAAM_RUNTIME",
+                    "The gigaam provider requires a PyTorch runtime supplied by docling-gigaam.",
+                    "torch",
+                )
+            )
+        device = config.docling_device.casefold()
+        if device == "mlx":
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "GIGAAM_UNSUPPORTED_DEVICE",
+                    "The gigaam provider does not support the MLX device; "
+                    "use auto, cpu, cuda, or mps.",
+                    "MEDIA_IMPORT_DOCLING_DEVICE",
+                )
+            )
+        elif device == "mps" or (
+            device == "auto" and platform.system() == "Darwin" and platform.machine() == "arm64"
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    "warning",
+                    "GIGAAM_MPS_CAVEAT",
+                    "GigaAM can use MPS, but its local Silero long-form path may run "
+                    "unsupported operations on CPU.",
+                    None,
+                )
+            )
     if config.docling_artifacts_path and not config.docling_artifacts_path.exists():
         diagnostics.append(
             Diagnostic(

@@ -11,5 +11,10 @@
   "transcription_model": "whisper_turbo",
   "transcription_timeout_seconds": 3600,
   "ocr_timeout_seconds": 600,
-  "jobs": 1
+  "jobs": 1,
+  "_optional_gigaam_example": {
+    "transcription_provider": "gigaam",
+    "transcription_model": "v3_e2e_rnnt",
+    "transcription_language": "ru"
+  }
 }
