@@ -228,6 +228,24 @@ def test_cli_accepts_ebook_options() -> None:
     assert args.ebook_ocr_prompt == "Read labels"
 
 
+def test_cli_accepts_per_source_ebook_image_policies(tmp_path: Path) -> None:
+    policies = tmp_path / "policies.json"
+    policies.write_text('{"book.epub": "skip"}', encoding="utf-8")
+    args = cli._parser().parse_args(
+        [
+            "inspect",
+            "books",
+            "--vault-root",
+            "/tmp/vault",
+            "--output-dir",
+            "books",
+            "--ebook-image-policies-file",
+            str(policies),
+        ]
+    )
+    assert cli._overrides(args)["ebook_image_policies"] == {"book.epub": "skip"}
+
+
 def test_compound_fb2_zip_uses_book_output_stem(tmp_path: Path) -> None:
     config = Config(
         source="book.fb2.zip",

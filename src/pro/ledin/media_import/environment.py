@@ -67,7 +67,10 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
                         " or ".join(required),
                     )
                 )
-        if config.ebook_image_policy == "ocr" and config.ebook_ocr_callback != "pro-ledin-ocr":
+        if (
+            any(config.ebook_image_policy_for(item.source_path) == "ocr" for item in ebook_items)
+            and config.ebook_ocr_callback != "pro-ledin-ocr"
+        ):
             module = config.ebook_ocr_callback.split(":", 1)[0]
             try:
                 callback_available = bool(module) and importlib.util.find_spec(module) is not None

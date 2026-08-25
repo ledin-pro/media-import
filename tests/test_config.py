@@ -185,6 +185,37 @@ def test_ebook_rejects_unknown_image_policy(tmp_path: Path) -> None:
         )
 
 
+def test_ebook_supports_per_source_image_policies(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+            "ebook_image_policies": {
+                "fiction/book.epub": "skip",
+                "reference/book.epub": "referenced",
+            },
+        },
+        environ={},
+    )
+    assert config.ebook_image_policy_for("fiction/book.epub") == "skip"
+    assert config.ebook_image_policy_for("reference/book.epub") == "referenced"
+    assert config.ebook_image_policy_for("other/book.epub") == "referenced"
+
+
+def test_ebook_per_source_ocr_requires_prompt(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="requires exactly one"):
+        load_config(
+            overrides={
+                "source": str(tmp_path),
+                "vault_root": tmp_path / "vault",
+                "output_dir": "out",
+                "ebook_image_policies": {"book.epub": "ocr"},
+            },
+            environ={},
+        )
+
+
 def test_ebook_ocr_requires_prompt(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="requires exactly one"):
         load_config(

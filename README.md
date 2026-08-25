@@ -87,14 +87,26 @@ The checksum-verified official model downloads into the media-import cache on
 first real conversion. Long recordings use local Silero long-form processing.
 No API token is required.
 
-Ebooks default to referenced images:
+The package fallback for ebooks is referenced images. For per-book choices,
+write a JSON object keyed by the inventory `source_path`:
+
+`ebook-image-policies.json`:
+
+```json
+{
+  "fiction/book.epub": "referenced",
+  "reference/book.epub": "skip",
+  "manual/book.epub": "ocr"
+}
+```
 
 ```bash
-media-import inspect ./books --vault-root ~/vault --output-dir sources/books \
-  --ebook-image-policy referenced
+media-import import ./books --vault-root ~/vault --output-dir sources/books \
+  --ebook-image-policies-file ebook-image-policies.json --dry-run --json
 ```
 
 Use `--ebook-image-policy skip` to omit images. Use `ocr` to replace each image
 occurrence with recognized text; OCR requires `--ebook-ocr-prompt` (or prompt
 file), vision endpoint credentials, and explicit external-processing approval.
+The same `--ebook-image-policies-file` must be passed to the confirmed import.
 MOBI/AZW/AZW3 additionally require `mobitool` or Calibre `ebook-convert`.

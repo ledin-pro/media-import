@@ -55,6 +55,7 @@ def _parser() -> argparse.ArgumentParser:
         child.add_argument("--asset-mode", choices=["reference", "copy"])
         child.add_argument("--frame-mode", choices=["none", "text", "text-and-images", "images"])
         child.add_argument("--ebook-image-policy", choices=["skip", "referenced", "ocr"])
+        child.add_argument("--ebook-image-policies-file", type=Path)
         child.add_argument("--ebook-mobi-backend", choices=["auto", "mobitool", "calibre"])
         child.add_argument("--ebook-footnote-mode", choices=["native", "inline"])
         child.add_argument("--ebook-ocr-prompt")
@@ -126,7 +127,17 @@ def _overrides(args: argparse.Namespace) -> dict[str, Any]:
         "jobs",
         "verbose",
     )
-    return {name: getattr(args, name, None) for name in names}
+    values = {name: getattr(args, name, None) for name in names}
+    policies_file = getattr(args, "ebook_image_policies_file", None)
+    if policies_file is not None:
+        try:
+            policies = json.loads(policies_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigError(
+                f"Cannot read ebook image policies file {policies_file}: {exc}"
+            ) from exc
+        values["ebook_image_policies"] = policies
+    return values
 
 
 def _emit(value: dict[str, Any], json_output: bool) -> None:
@@ -230,12 +241,12 @@ def _inspect(
             item.source_path: {
                 "format": item.extension.lstrip("."),
                 "conversion_route": "docling-ebook",
-                "image_policy": config.ebook_image_policy,
+                "image_policy": config.ebook_image_policy_for(item.source_path),
                 "mobi_backend": config.ebook_mobi_backend,
                 "planned_output": candidate_paths[item.source_path],
                 "planned_asset_dir": (
                     str(Path(candidate_paths[item.source_path]).with_suffix("")) + "_artifacts"
-                    if config.ebook_image_policy == "referenced"
+                    if config.ebook_image_policy_for(item.source_path) == "referenced"
                     else None
                 ),
             }
@@ -610,8 +621,12 @@ def _process_item(
             if is_ebook_extension(item.extension):
                 if output_path is None:
                     raise ValueError("Ebook conversion requires a resolved output path")
+                ebook_config = replace(
+                    config,
+                    ebook_image_policy=config.ebook_image_policy_for(item.source_path),
+                )
                 body, document, ebook_details = convert_ebook_document(
-                    _source_value(item), config, output_path, output_root
+                    _source_value(item), ebook_config, output_path, output_root
                 )
                 status, errors = "complete", []
                 cache_path = None

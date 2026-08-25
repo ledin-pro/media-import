@@ -56,21 +56,35 @@ working CLI and the required `ffmpeg`/`ffprobe` executables for audio or video.
 3. When source and destination are available, run `media-import inspect ... --json`
    before asking policy questions. Inspection is read-only and exposes the choices
    that are actually unresolved, including `conflict_groups` and `pdf_preflight`.
-4. Reuse supplied values and the defaults below. When inspection finds duplicate
-   media candidates, compare transcripts only as needed and ask one consolidated
-   batch question naming the canonical source for every group. Do not choose a
-   canonical recording automatically.
-5. Run `media-import import ... --dry-run --json` and show the exact routes,
+4. Treat `inspect` as the inventory stage. If the inventory contains ebooks,
+   stop after inspection and ask for an image policy separately for every book,
+   naming its `source_path` and planned output. Offer exactly these choices:
+   `referenced` (extract and link managed image assets), `skip` (omit images), or
+   `ocr` (replace images with recognized text). Do not silently apply the
+   package default `referenced`, even when all books share the same default.
+   One consolidated message is allowed, but every book must have its own
+   answer, for example: `fiction/book.epub -> referenced|skip|ocr`.
+   Collect all ebook choices before continuing. Save a JSON object mapping each
+   ebook `source_path` to its selected policy and pass it with
+   `--ebook-image-policies-file` to the dry-run and confirmed import. Reuse other
+   supplied values and the defaults below. When inspection finds duplicate media
+   candidates, compare transcripts only as needed and ask one consolidated batch
+   question naming the
+   canonical source for every group. Do not choose a canonical recording
+   automatically.
+5. Run `media-import import ... --dry-run --json` only after the per-book image
+   choices are resolved, and show the exact routes,
    counts, conflicts, and missing dependencies.
 6. Wait for confirmation before running a real import with `--confirmed`.
 7. Run `media-import validate` after import.
 8. Report counts, `manifest.json`, validation status, warnings, and failures.
 
 In the first workflow response, name the `media-import` CLI and make the sequence
-explicit: `inspect`, `import --dry-run`, user confirmation, `import --confirmed`,
-then `validate`. If an illustrative path or URL cannot be inspected, request the
-real value while still stating this exact sequence. Always mention final manifest
-and validation reporting, including for resume workflows.
+explicit: `inspect`/inventory, per-book ebook image questions, `import --dry-run`,
+user confirmation, `import --confirmed`, then `validate`. If an illustrative path
+or URL cannot be inspected, request the real value while still stating this exact
+sequence. Always mention final manifest and validation reporting, including for
+resume workflows.
 
 External processing is approved by default. Never expose API keys in commands,
 logs, or manifests. Never edit unrelated project notes unless the user separately
@@ -98,7 +112,10 @@ for more frequent inventory and OCR/ASR details.
 - Use `frame_mode=none` when importing speech transcripts without sampled video-frame OCR.
 - Route PDF and image documents through the `ocr` CLI.
 - Route supported ebooks through `pro-ledin-docling-ebook`.
-- Preserve ebook images as managed referenced assets by default.
+- The package fallback for ebook images is `referenced`, but the skill must obtain
+  an explicit per-book choice after inventory before passing an ebook policy. For
+  different choices in one source tree, use the per-book mapping file rather than
+  collapsing them to one global policy.
 - Ebook OCR requires a prompt and replaces pictures with faithful recognized text.
 - Auto-detect spoken and OCR languages.
 - Prefer a validated existing transcript; otherwise use Docling Whisper Turbo.

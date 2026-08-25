@@ -19,5 +19,9 @@ removes only unchanged owned assets. Ebook OCR checkpoints live under the cache
 directory and are recorded for diagnostics, but are not required for corpus
 validity after the final Markdown has been written.
 
+Each ebook item records its effective `ebook_image_policy`; when policies differ
+within one source tree, the manifest configuration also records the
+`source_path`-to-policy mapping.
+
 Visible media Markdown contains no timestamps. Timing remains in each manifest
 event under `track.start_time` and `track.end_time`.

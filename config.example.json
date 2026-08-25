@@ -5,6 +5,7 @@
   "path_map": {},
   "office_fallback": "none",
   "ebook_image_policy": "referenced",
+  "ebook_image_policies": {},
   "ebook_mobi_backend": "auto",
   "ebook_footnote_mode": "native",
   "language": "auto",

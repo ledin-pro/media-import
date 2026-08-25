@@ -73,6 +73,7 @@ class Config:
     path_map: dict[str, str] = field(default_factory=dict)
     office_fallback: str = "none"
     ebook_image_policy: str = "referenced"
+    ebook_image_policies: dict[str, str] = field(default_factory=dict)
     ebook_mobi_backend: str = "auto"
     ebook_footnote_mode: str = "native"
     ebook_ocr_prompt: str = ""
@@ -127,6 +128,9 @@ class Config:
                 data[key] = str(value)
         data["output_root"] = str(self.output_root)
         return data
+
+    def ebook_image_policy_for(self, source_path: str) -> str:
+        return self.ebook_image_policies.get(source_path.strip("/"), self.ebook_image_policy)
 
 
 ENV_MAP = {
@@ -220,6 +224,7 @@ def load_config(
     layout = str(values.get("layout", "mirror"))
     office_fallback = str(values.get("office_fallback", "none"))
     ebook_image_policy = str(values.get("ebook_image_policy", "referenced"))
+    raw_ebook_image_policies = values.get("ebook_image_policies", {})
     ebook_mobi_backend = str(values.get("ebook_mobi_backend", "auto"))
     ebook_footnote_mode = str(values.get("ebook_footnote_mode", "native"))
     provider = str(values.get("transcription_provider", "auto"))
@@ -243,6 +248,21 @@ def load_config(
         raise ConfigError(f"Unsupported office_fallback: {office_fallback}")
     if ebook_image_policy not in EBOOK_IMAGE_POLICIES:
         raise ConfigError(f"Unsupported ebook_image_policy: {ebook_image_policy}")
+    if not isinstance(raw_ebook_image_policies, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in raw_ebook_image_policies.items()
+    ):
+        raise ConfigError("ebook_image_policies must be a JSON object of source paths to policies")
+    ebook_image_policies = {
+        key.strip("/"): value for key, value in raw_ebook_image_policies.items()
+    }
+    if any(not key for key in ebook_image_policies):
+        raise ConfigError("ebook_image_policies cannot contain an empty source path")
+    invalid_ebook_image_policies = set(ebook_image_policies.values()) - EBOOK_IMAGE_POLICIES
+    if invalid_ebook_image_policies:
+        raise ConfigError(
+            "Unsupported ebook image policies: " + ", ".join(sorted(invalid_ebook_image_policies))
+        )
     if ebook_mobi_backend not in EBOOK_MOBI_BACKENDS:
         raise ConfigError(f"Unsupported ebook_mobi_backend: {ebook_mobi_backend}")
     if ebook_footnote_mode not in EBOOK_FOOTNOTE_MODES:
@@ -269,7 +289,8 @@ def load_config(
         raise ConfigError(f"Ebook OCR callback config does not exist: {ebook_ocr_callback_config}")
     ebook_ocr_callback = str(values.get("ebook_ocr_callback", "pro-ledin-ocr"))
     ebook_restart_ocr = _boolean(values.get("ebook_restart_ocr"), "ebook_restart_ocr")
-    if ebook_image_policy != "ocr" and any(
+    ebook_ocr_required = ebook_image_policy == "ocr" or "ocr" in ebook_image_policies.values()
+    if not ebook_ocr_required and any(
         (
             ebook_ocr_prompt,
             ebook_ocr_prompt_file,
@@ -283,7 +304,7 @@ def load_config(
     vision_url = str(values.get("vision_api_url", ""))
     vision_key = str(values.get("vision_api_key", ""))
     vision_model = str(values.get("vision_model", ""))
-    if ebook_image_policy == "ocr":
+    if ebook_ocr_required:
         if bool(ebook_ocr_prompt) == bool(ebook_ocr_prompt_file):
             raise ConfigError(
                 "ebook_image_policy=ocr requires exactly one ebook OCR prompt or prompt file"
@@ -351,6 +372,7 @@ def load_config(
         path_map=path_map,
         office_fallback=office_fallback,
         ebook_image_policy=ebook_image_policy,
+        ebook_image_policies=ebook_image_policies,
         ebook_mobi_backend=ebook_mobi_backend,
         ebook_footnote_mode=ebook_footnote_mode,
         ebook_ocr_prompt=ebook_ocr_prompt,

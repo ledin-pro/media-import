@@ -36,6 +36,19 @@
         "Presents resume conflicts in dry-run",
         "Runs validation after resume"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Import the books in /Users/me/books into /Users/me/vault under sources/books. There are three EPUB files and I want to decide separately whether each book's images should be referenced, skipped, or OCRed.",
+      "expected_output": "The agent runs inventory first, then asks for an explicit image-processing choice for each detected book before presenting the dry-run. It does not silently apply referenced to every book and reports the selected policies in the dry-run and final manifest.",
+      "files": [],
+      "assertions": [
+        "Runs inspect as inventory before asking ebook image questions",
+        "Asks for a separate referenced, skip, or ocr choice for every book",
+        "Does not silently apply the package default referenced",
+        "Runs dry-run only after all per-book choices are resolved",
+        "Reports selected ebook image policies in dry-run and final manifest"
+      ]
     }
   ]
 }

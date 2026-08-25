@@ -13,7 +13,8 @@ or `auto`. These routes activate only after Docling fails or returns empty outpu
 and the selected route is recorded in the manifest. Do not create custom Office
 parsers in this package.
 
-Ebook image policy is `referenced` by default. Managed files are written beside
-the final Markdown under `<stem>_artifacts/` and recorded with hashes in the
-manifest. `skip` omits images. `ocr` stores resumable checkpoints in the cache
-and exports recognized text without internal checkpoint metadata.
+The package fallback ebook image policy is `referenced`, but the skill asks for
+an explicit policy per book after inventory. Managed files for `referenced` are
+written beside the final Markdown under `<stem>_artifacts/` and recorded with
+hashes in the manifest. `skip` omits images. `ocr` stores resumable checkpoints
+in the cache and exports recognized text without internal checkpoint metadata.
