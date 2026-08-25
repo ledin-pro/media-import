@@ -4,6 +4,9 @@
   "layout": "mirror",
   "path_map": {},
   "office_fallback": "none",
+  "ebook_image_policy": "referenced",
+  "ebook_mobi_backend": "auto",
+  "ebook_footnote_mode": "native",
   "language": "auto",
   "ocr_language": "auto",
   "transcription_policy": "prefer-existing",
@@ -16,5 +19,12 @@
     "transcription_provider": "gigaam",
     "transcription_model": "v3_e2e_rnnt",
     "transcription_language": "ru"
+  },
+  "_optional_ebook_ocr_example": {
+    "ebook_image_policy": "ocr",
+    "ebook_ocr_prompt_file": "./prompts/ebook-image-ocr.txt",
+    "ebook_ocr_callback": "pro-ledin-ocr",
+    "ebook_ocr_timeout_seconds": 300,
+    "ebook_ocr_max_attempts": 3
   }
 }

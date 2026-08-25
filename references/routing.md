@@ -4,7 +4,8 @@
 
 Resolve the source, vault root, relative output directory, layout, asset mode,
 frame mode, language, OCR language, transcription policy, and existing-output
-policy. Reuse values already present in the request.
+policy. For ebooks also resolve image policy (`referenced`, `skip`, or `ocr`).
+Reuse values already present in the request.
 
 Defaults are `mirror`, `reference`, `text`, `auto`, `prefer-existing`, and
 external processing approved.
@@ -36,3 +37,7 @@ Keep unsupported, failed, partial, and conflicting items visible in the final re
 The skill orchestrates decisions. `inspect` performs collision grouping, ffprobe
 metadata, and PDF preflight. Transcript comparison is the installed
 `compare-transcripts` subcommand. These analysis steps do not overwrite Markdown.
+
+Ebook inspect output reports the `docling-ebook` route, planned Markdown and
+asset directory, image policy, and MOBI backend. OCR requires a non-empty prompt;
+its checkpoint is cache state, not a corpus artifact.

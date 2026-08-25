@@ -8,6 +8,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from .docling_adapter import DocumentEvent, Track, iter_events
 from .docling_documents import convert_document, export_markdown
 from .docling_imports import load_docling_document
 from .docling_media import convert_media, release_media_memory
+from .ebook_documents import convert_ebook_document, is_ebook_extension
 from .environment import has_errors, run_preflight
 from .inventory import SourceItem, inventory, sha256_file
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
@@ -52,6 +54,16 @@ def _parser() -> argparse.ArgumentParser:
         child.add_argument("--cache-dir", type=Path)
         child.add_argument("--asset-mode", choices=["reference", "copy"])
         child.add_argument("--frame-mode", choices=["none", "text", "text-and-images", "images"])
+        child.add_argument("--ebook-image-policy", choices=["skip", "referenced", "ocr"])
+        child.add_argument("--ebook-mobi-backend", choices=["auto", "mobitool", "calibre"])
+        child.add_argument("--ebook-footnote-mode", choices=["native", "inline"])
+        child.add_argument("--ebook-ocr-prompt")
+        child.add_argument("--ebook-ocr-prompt-file", type=Path)
+        child.add_argument("--ebook-ocr-callback")
+        child.add_argument("--ebook-ocr-callback-config", type=Path)
+        child.add_argument("--ebook-ocr-timeout-seconds", type=int)
+        child.add_argument("--ebook-ocr-max-attempts", type=int)
+        child.add_argument("--ebook-restart-ocr", action="store_true", default=None)
         child.add_argument("--layout", choices=["mirror", "mapped"])
         child.add_argument("--language")
         child.add_argument("--ocr-language")
@@ -96,6 +108,16 @@ def _overrides(args: argparse.Namespace) -> dict[str, Any]:
         "cache_dir",
         "asset_mode",
         "frame_mode",
+        "ebook_image_policy",
+        "ebook_mobi_backend",
+        "ebook_footnote_mode",
+        "ebook_ocr_prompt",
+        "ebook_ocr_prompt_file",
+        "ebook_ocr_callback",
+        "ebook_ocr_callback_config",
+        "ebook_ocr_timeout_seconds",
+        "ebook_ocr_max_attempts",
+        "ebook_restart_ocr",
         "layout",
         "language",
         "ocr_language",
@@ -117,6 +139,28 @@ def _emit(value: dict[str, Any], json_output: bool) -> None:
         if key == "message":
             continue
         print(f"{key}: {json.dumps(item, ensure_ascii=False, sort_keys=True)}")
+
+
+def _safe_error_message(error: Exception, config: Config) -> str:
+    message = str(error)
+    secrets = [config.vision_api_key, config.ebook_ocr_prompt]
+    if config.ebook_ocr_prompt_file is not None:
+        with suppress(OSError):
+            secrets.append(config.ebook_ocr_prompt_file.read_text(encoding="utf-8").strip())
+    if config.ebook_ocr_callback_config is not None:
+        try:
+            value = json.loads(config.ebook_ocr_callback_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, dict):
+            for key, secret in value.items():
+                if any(
+                    token in str(key).casefold() for token in ("key", "token", "secret", "password")
+                ):
+                    secrets.append(str(secret))
+    for secret in sorted({value for value in secrets if value}, key=len, reverse=True):
+        message = message.replace(secret, "[redacted]")
+    return message
 
 
 def _inspect(
@@ -182,6 +226,22 @@ def _inspect(
             ignored_sources=associated_vtt,
         ),
         "pdf_preflight": pdf_preflight,
+        "ebooks": {
+            item.source_path: {
+                "format": item.extension.lstrip("."),
+                "conversion_route": "docling-ebook",
+                "image_policy": config.ebook_image_policy,
+                "mobi_backend": config.ebook_mobi_backend,
+                "planned_output": candidate_paths[item.source_path],
+                "planned_asset_dir": (
+                    str(Path(candidate_paths[item.source_path]).with_suffix("")) + "_artifacts"
+                    if config.ebook_image_policy == "referenced"
+                    else None
+                ),
+            }
+            for item in items
+            if is_ebook_extension(item.extension)
+        },
     }
     return result, items
 
@@ -220,6 +280,8 @@ def _inspect_existing_output(config: Config, items: list[SourceItem]) -> dict[st
             output = config.output_root / str(old["output_path"])
             if output.exists() and sha256_file(output) != old["output_sha256"]:
                 conflicts.append(item.source_path)
+        if old and _modified_owned_assets(old, config.output_root):
+            conflicts.append(item.source_path)
     return {
         "manifest": True,
         "changes": sorted(changes),
@@ -269,17 +331,18 @@ def _source_value(item: SourceItem) -> Path | str:
 
 
 def _output_source_path(item: SourceItem, config: Config) -> str:
+    source_path = item.source_path[:-4] if item.extension == ".fb2.zip" else item.source_path
     if config.layout == "mirror":
-        return item.source_path
+        return source_path
     matches = [
         (source, destination)
         for source, destination in config.path_map.items()
-        if item.source_path == source or item.source_path.startswith(f"{source}/")
+        if source_path == source or source_path.startswith(f"{source}/")
     ]
     if not matches:
-        raise ConfigError(f"No path_map entry matches source path: {item.source_path}")
+        raise ConfigError(f"No path_map entry matches source path: {source_path}")
     source, destination = max(matches, key=lambda pair: len(pair[0]))
-    suffix = item.source_path[len(source) :].lstrip("/")
+    suffix = source_path[len(source) :].lstrip("/")
     return "/".join(part for part in (destination, suffix) if part)
 
 
@@ -394,6 +457,7 @@ def _process_item(
     config: Config,
     output_root: Path,
     progress: ProgressReporter | None = None,
+    output_path: Path | None = None,
 ) -> tuple[str, dict[str, Any]]:
     title = title_from_path(item.source_path)
     visual_results: dict[str, dict[str, Any]] = {}
@@ -543,7 +607,23 @@ def _process_item(
                 engine=config.ocr_engine or "docling",
             )
         try:
-            result = convert_document(_source_value(item), config, progress=progress)
+            if is_ebook_extension(item.extension):
+                if output_path is None:
+                    raise ValueError("Ebook conversion requires a resolved output path")
+                body, document, ebook_details = convert_ebook_document(
+                    _source_value(item), config, output_path, output_root
+                )
+                status, errors = "complete", []
+                cache_path = None
+                route = "docling-ebook"
+            else:
+                result = convert_document(_source_value(item), config, progress=progress)
+                status, errors = _conversion_status(result)
+                document = result.document
+                cache_path = _cache_docling(document, item, config)
+                body = export_markdown(document)
+                ebook_details = {}
+                route = str(getattr(result, "route", "docling"))
         except Exception:
             if progress:
                 progress.emit(
@@ -553,29 +633,29 @@ def _process_item(
                     elapsed=f"{time.monotonic() - started:.1f}s",
                 )
             raise
-        status, errors = _conversion_status(result)
-        cache_path = _cache_docling(result.document, item, config)
-        body = export_markdown(result.document)
         if progress:
             progress.emit(
                 "document",
                 "complete",
                 result=status,
                 source=item.source_path,
-                route=str(getattr(result, "route", "docling")),
+                route=route,
                 elapsed=f"{time.monotonic() - started:.1f}s",
             )
+        details = {
+            "status": status,
+            "errors": errors,
+            "warnings": list(ebook_details.get("ebook_warnings", [])),
+            "cache_path": cache_path,
+            "content_sha256": normalized_text_hash(body),
+            "conversion_route": route,
+        }
+        details.update(ebook_details)
         return render_document_markdown(
             title=title,
             metadata=_metadata(item, config, status, "document"),
             body=body,
-        ), {
-            "status": status,
-            "errors": errors,
-            "cache_path": cache_path,
-            "content_sha256": normalized_text_hash(body),
-            "conversion_route": str(getattr(result, "route", "docling")),
-        }
+        ), details
 
     if item.kind == "docling" and item.absolute_path:
         if item.extension == ".vtt":
@@ -686,6 +766,61 @@ def _write_indexes(output_root: Path, records: list[dict[str, Any]]) -> None:
         atomic_write(index_path, "\n".join(lines) + "\n", [output_root])
 
 
+def _owned_assets_match(record: dict[str, Any], output_root: Path) -> bool:
+    for asset in record.get("assets", []):
+        path = (output_root / str(asset.get("path", ""))).resolve()
+        expected = asset.get("sha256")
+        if (
+            not path.is_relative_to(output_root.resolve())
+            or not path.is_file()
+            or not expected
+            or sha256_file(path) != expected
+        ):
+            return False
+    return True
+
+
+def _modified_owned_assets(record: dict[str, Any], output_root: Path) -> list[str]:
+    modified: list[str] = []
+    for asset in record.get("assets", []):
+        relative = str(asset.get("path", ""))
+        path = (output_root / relative).resolve()
+        expected = asset.get("sha256")
+        if (
+            path.is_relative_to(output_root.resolve())
+            and path.is_file()
+            and expected
+            and sha256_file(path) != expected
+        ):
+            modified.append(relative)
+    return modified
+
+
+def _remove_owned_assets(record: dict[str, Any], output_root: Path) -> tuple[int, list[str]]:
+    removed = 0
+    conflicts: list[str] = []
+    parents: set[Path] = set()
+    for asset in record.get("assets", []):
+        relative = str(asset.get("path", ""))
+        path = (output_root / relative).resolve()
+        if not path.is_relative_to(output_root.resolve()):
+            conflicts.append(relative)
+            continue
+        parents.add(path.parent)
+        if not path.exists():
+            continue
+        expected = asset.get("sha256")
+        if not expected or sha256_file(path) != expected:
+            conflicts.append(relative)
+            continue
+        path.unlink()
+        removed += 1
+    for parent in sorted(parents, key=lambda value: len(value.parts), reverse=True):
+        if parent != output_root.resolve() and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+    return removed, conflicts
+
+
 def _run_import(
     config: Config,
     items: list[SourceItem],
@@ -720,8 +855,7 @@ def _run_import(
     if unresolved:
         names = ", ".join(unresolved)
         raise ConfigError(
-            "Unresolved same-basename media conflicts; provide --conflict-decisions: "
-            f"{names}"
+            f"Unresolved same-basename media conflicts; provide --conflict-decisions: {names}"
         )
     duplicate_aliases.update(selected_aliases)
 
@@ -856,6 +990,7 @@ def _run_import(
                 and previous.get("output_sha256")
                 and output_path.exists()
                 and sha256_file(output_path) == previous["output_sha256"]
+                and _owned_assets_match(previous, output_root)
             ):
                 reused = dict(previous)
                 reused["resumed"] = True
@@ -871,17 +1006,26 @@ def _run_import(
                         source=item.source_path,
                     )
                 continue
-            if (
-                previous
-                and output_path.exists()
-                and previous.get("output_sha256")
-                and sha256_file(output_path) != previous["output_sha256"]
+            modified_assets = _modified_owned_assets(previous, output_root) if previous else []
+            if previous and (
+                (
+                    output_path.exists()
+                    and previous.get("output_sha256")
+                    and sha256_file(output_path) != previous["output_sha256"]
+                )
+                or modified_assets
             ):
+                errors = ["Existing owned output was modified; refusing to overwrite"]
+                if modified_assets:
+                    errors = [
+                        "Existing owned ebook assets were modified; refusing to overwrite: "
+                        + ", ".join(modified_assets)
+                    ]
                 record.update(
                     {
                         "status": "conflict",
                         "output_path": relative_output,
-                        "errors": ["Existing owned output was modified; refusing to overwrite"],
+                        "errors": errors,
                     }
                 )
                 manifest["items"].append(record)
@@ -897,7 +1041,14 @@ def _run_import(
                     )
                 continue
             try:
-                text, details = _process_item(item, items, config, output_root, progress)
+                text, details = _process_item(
+                    item,
+                    items,
+                    config,
+                    output_root,
+                    progress,
+                    output_path,
+                )
             finally:
                 if item.kind == "media":
                     release_media_memory()
@@ -922,8 +1073,59 @@ def _run_import(
                         source=item.source_path,
                     )
                 continue
+            asset_payloads = details.pop("_asset_payloads", [])
+            previous_assets = {
+                str(asset.get("path")): asset for asset in (previous or {}).get("assets", [])
+            }
+            asset_conflicts: list[str] = []
+            for asset in asset_payloads:
+                relative_asset = str(asset["path"])
+                destination = (output_root / relative_asset).resolve()
+                old_asset = previous_assets.get(relative_asset)
+                if destination.exists() and (
+                    old_asset is None
+                    or not old_asset.get("sha256")
+                    or sha256_file(destination) != old_asset["sha256"]
+                ):
+                    asset_conflicts.append(relative_asset)
+            if asset_conflicts:
+                record.update(details)
+                record.update(
+                    {
+                        "status": "conflict",
+                        "output_path": relative_output,
+                        "errors": [
+                            "Ebook asset path is occupied or modified; refusing to overwrite: "
+                            + ", ".join(asset_conflicts)
+                        ],
+                    }
+                )
+                manifest["items"].append(record)
+                save_manifest(manifest_path, manifest, output_root)
+                continue
+            for asset in asset_payloads:
+                atomic_write(
+                    output_root / str(asset["path"]),
+                    asset["data"],
+                    [output_root],
+                )
             atomic_write(output_path, text, [output_root])
             record.update(details)
+            new_asset_paths = {str(asset.get("path")) for asset in details.get("assets", [])}
+            if previous:
+                obsolete = {
+                    "assets": [
+                        asset
+                        for asset in previous.get("assets", [])
+                        if str(asset.get("path")) not in new_asset_paths
+                    ]
+                }
+                _, obsolete_conflicts = _remove_owned_assets(obsolete, output_root)
+                if obsolete_conflicts:
+                    record["warnings"].append(
+                        "Old ebook assets were modified and retained: "
+                        + ", ".join(obsolete_conflicts)
+                    )
             if config.asset_mode == "copy" and item.absolute_path is not None:
                 original_relative = Path("originals") / Path(item.source_path.replace("!/", "/"))
                 original_path = output_root / original_relative
@@ -944,7 +1146,15 @@ def _run_import(
         except PdfPasswordRequired as exc:
             record.update({"status": "blocked", "errors": [str(exc)]})
         except Exception as exc:
-            record.update({"status": "failed", "errors": [str(exc)]})
+            blocked = getattr(exc, "code", "") == "drm_unsupported" or type(exc).__name__ == (
+                "OcrCheckpointMismatchError"
+            )
+            record.update(
+                {
+                    "status": "blocked" if blocked else "failed",
+                    "errors": [_safe_error_message(exc, config)],
+                }
+            )
         manifest["items"].append(record)
         save_manifest(manifest_path, manifest, output_root)
         if progress:
@@ -970,6 +1180,22 @@ def _run_import(
         stale_path = (output_root / str(previous["output_path"])).resolve()
         expected_hash = previous.get("output_sha256")
         stale_record = dict(previous)
+        modified_assets = _modified_owned_assets(previous, output_root)
+        if modified_assets:
+            stale_record.update(
+                {
+                    "status": "conflict",
+                    "stale": True,
+                    "errors": [
+                        "Stale ebook assets were modified; refusing to remove: "
+                        + ", ".join(modified_assets)
+                    ],
+                }
+            )
+            stale_conflicts += 1
+            manifest["items"].append(stale_record)
+            save_manifest(manifest_path, manifest, output_root)
+            continue
         if (
             stale_path.exists()
             and expected_hash
@@ -978,8 +1204,21 @@ def _run_import(
             in stale_path.read_text(encoding="utf-8", errors="replace")
         ):
             stale_path.unlink()
-            stale_record.update({"status": "removed", "stale": True})
-            stale_removed += 1
+            asset_removed, asset_conflicts = _remove_owned_assets(previous, output_root)
+            if asset_conflicts:
+                stale_record.update(
+                    {
+                        "status": "conflict",
+                        "stale": True,
+                        "errors": [
+                            "Stale ebook assets could not be removed: " + ", ".join(asset_conflicts)
+                        ],
+                    }
+                )
+                stale_conflicts += 1
+            else:
+                stale_record.update({"status": "removed", "stale": True})
+                stale_removed += 1 + asset_removed
         elif stale_path.exists():
             stale_record.update(
                 {

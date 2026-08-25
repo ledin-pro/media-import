@@ -4,11 +4,13 @@ import hashlib
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from .inventory import sha256_file
 from .manifest import load_manifest, save_manifest
 
 EMBEDDED_WIKILINK = re.compile(r"!\[\[([^\]|#]+)")
+MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
 
 
 def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, Any]:
@@ -59,6 +61,29 @@ def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, 
             target = (output_root / link).resolve()
             if not target.is_relative_to(output_root.resolve()) or not target.exists():
                 errors.append(f"Broken embedded asset in {output_path}: {link}")
+        for link in MARKDOWN_IMAGE.findall(content):
+            decoded = unquote(link.strip("<>"))
+            if decoded.startswith(("data:", "http://", "https://")):
+                continue
+            relative_link = Path(decoded)
+            if relative_link.is_absolute() or ".." in relative_link.parts:
+                errors.append(f"Unsafe Markdown image in {output_path}: {decoded}")
+                continue
+            target = (artifact.parent / relative_link).resolve()
+            if not target.is_relative_to(output_root.resolve()) or not target.exists():
+                errors.append(f"Broken Markdown image in {output_path}: {decoded}")
+        for asset in item.get("assets", []):
+            asset_path = str(asset.get("path", ""))
+            target = (output_root / asset_path).resolve()
+            if not target.is_relative_to(output_root.resolve()):
+                errors.append(f"Ebook asset escapes corpus root: {asset_path}")
+                continue
+            if not target.is_file():
+                errors.append(f"Missing ebook asset: {asset_path}")
+                continue
+            expected_asset_hash = asset.get("sha256")
+            if expected_asset_hash and sha256_file(target) != expected_asset_hash:
+                errors.append(f"Owned ebook asset was modified: {asset_path}")
 
     for required in ("index.md", "catalog.md"):
         if not (output_root / required).exists():

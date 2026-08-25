@@ -22,14 +22,20 @@ MEDIA_EXTENSIONS = {
     ".webm",
 }
 DOCUMENT_EXTENSIONS = {
+    ".azw",
+    ".azw3",
     ".csv",
     ".doc",
     ".docx",
     ".epub",
+    ".fb2",
+    ".fb2.zip",
+    ".fbz",
     ".html",
     ".jpeg",
     ".jpg",
     ".md",
+    ".mobi",
     ".odf",
     ".pdf",
     ".png",
@@ -71,6 +77,8 @@ class SourceItem:
 
 def source_extension(path: Path) -> str:
     name = path.name.casefold()
+    if name.endswith(".fb2.zip"):
+        return ".fb2.zip"
     if name.endswith(".tar.gz"):
         return ".tar.gz"
     return path.suffix.casefold()

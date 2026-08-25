@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Mapping
@@ -26,6 +27,9 @@ ASSET_MODES = {"reference", "copy"}
 FRAME_MODES = {"none", "text", "text-and-images", "images"}
 LAYOUTS = {"mirror", "mapped"}
 OFFICE_FALLBACKS = {"none", "auto", "markitdown", "pandoc"}
+EBOOK_IMAGE_POLICIES = {"skip", "referenced", "ocr"}
+EBOOK_MOBI_BACKENDS = {"auto", "mobitool", "calibre"}
+EBOOK_FOOTNOTE_MODES = {"native", "inline"}
 
 
 def _expanded_path(value: str) -> Path:
@@ -44,6 +48,19 @@ def _positive_int(value: Any, name: str, default: int) -> int:
     return parsed
 
 
+def _boolean(value: Any, name: str, default: bool = False) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True)
 class Config:
     source: str
@@ -55,6 +72,16 @@ class Config:
     layout: str = "mirror"
     path_map: dict[str, str] = field(default_factory=dict)
     office_fallback: str = "none"
+    ebook_image_policy: str = "referenced"
+    ebook_mobi_backend: str = "auto"
+    ebook_footnote_mode: str = "native"
+    ebook_ocr_prompt: str = ""
+    ebook_ocr_prompt_file: Path | None = None
+    ebook_ocr_callback: str = "pro-ledin-ocr"
+    ebook_ocr_callback_config: Path | None = None
+    ebook_ocr_timeout_seconds: int = 300
+    ebook_ocr_max_attempts: int = 3
+    ebook_restart_ocr: bool = False
     language: str = "auto"
     ocr_language: str = "auto"
     ocr_engine: str | None = None
@@ -82,6 +109,19 @@ class Config:
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("vision_api_key", None)
+        prompt = data.pop("ebook_ocr_prompt", "")
+        if prompt:
+            data["ebook_ocr_prompt_sha256"] = hashlib.sha256(
+                str(prompt).encode("utf-8")
+            ).hexdigest()
+        if self.ebook_ocr_prompt_file and self.ebook_ocr_prompt_file.is_file():
+            data["ebook_ocr_prompt_sha256"] = hashlib.sha256(
+                self.ebook_ocr_prompt_file.read_bytes()
+            ).hexdigest()
+        if self.ebook_ocr_callback_config and self.ebook_ocr_callback_config.is_file():
+            data["ebook_ocr_callback_config_sha256"] = hashlib.sha256(
+                self.ebook_ocr_callback_config.read_bytes()
+            ).hexdigest()
         for key, value in list(data.items()):
             if isinstance(value, Path):
                 data[key] = str(value)
@@ -98,6 +138,16 @@ ENV_MAP = {
     "frame_mode": "MEDIA_IMPORT_FRAME_MODE",
     "layout": "MEDIA_IMPORT_LAYOUT",
     "office_fallback": "MEDIA_IMPORT_OFFICE_FALLBACK",
+    "ebook_image_policy": "MEDIA_IMPORT_EBOOK_IMAGE_POLICY",
+    "ebook_mobi_backend": "MEDIA_IMPORT_EBOOK_MOBI_BACKEND",
+    "ebook_footnote_mode": "MEDIA_IMPORT_EBOOK_FOOTNOTE_MODE",
+    "ebook_ocr_prompt": "MEDIA_IMPORT_EBOOK_OCR_PROMPT",
+    "ebook_ocr_prompt_file": "MEDIA_IMPORT_EBOOK_OCR_PROMPT_FILE",
+    "ebook_ocr_callback": "MEDIA_IMPORT_EBOOK_OCR_CALLBACK",
+    "ebook_ocr_callback_config": "MEDIA_IMPORT_EBOOK_OCR_CALLBACK_CONFIG",
+    "ebook_ocr_timeout_seconds": "MEDIA_IMPORT_EBOOK_OCR_TIMEOUT_SECONDS",
+    "ebook_ocr_max_attempts": "MEDIA_IMPORT_EBOOK_OCR_MAX_ATTEMPTS",
+    "ebook_restart_ocr": "MEDIA_IMPORT_EBOOK_RESTART_OCR",
     "language": "MEDIA_IMPORT_LANGUAGE",
     "ocr_language": "MEDIA_IMPORT_OCR_LANGUAGE",
     "ocr_engine": "MEDIA_IMPORT_OCR_ENGINE",
@@ -169,6 +219,9 @@ def load_config(
     frame_mode = str(values.get("frame_mode", "text"))
     layout = str(values.get("layout", "mirror"))
     office_fallback = str(values.get("office_fallback", "none"))
+    ebook_image_policy = str(values.get("ebook_image_policy", "referenced"))
+    ebook_mobi_backend = str(values.get("ebook_mobi_backend", "auto"))
+    ebook_footnote_mode = str(values.get("ebook_footnote_mode", "native"))
     provider = str(values.get("transcription_provider", "auto"))
     policy = str(values.get("transcription_policy", "prefer-existing"))
     ocr_engine = str(values.get("ocr_engine") or "").strip() or None
@@ -188,6 +241,12 @@ def load_config(
         raise ConfigError("layout=mapped requires path_map in the configuration file")
     if office_fallback not in OFFICE_FALLBACKS:
         raise ConfigError(f"Unsupported office_fallback: {office_fallback}")
+    if ebook_image_policy not in EBOOK_IMAGE_POLICIES:
+        raise ConfigError(f"Unsupported ebook_image_policy: {ebook_image_policy}")
+    if ebook_mobi_backend not in EBOOK_MOBI_BACKENDS:
+        raise ConfigError(f"Unsupported ebook_mobi_backend: {ebook_mobi_backend}")
+    if ebook_footnote_mode not in EBOOK_FOOTNOTE_MODES:
+        raise ConfigError(f"Unsupported ebook_footnote_mode: {ebook_footnote_mode}")
     if provider not in TRANSCRIPTION_PROVIDERS:
         raise ConfigError(f"Unsupported transcription provider: {provider}")
     if policy not in TRANSCRIPTION_POLICIES:
@@ -196,6 +255,47 @@ def load_config(
         raise ConfigError(f"Unsupported OCR engine: {ocr_engine}")
     if provider == "existing" and policy == "force":
         raise ConfigError("provider=existing cannot be combined with policy=force")
+
+    ebook_ocr_prompt = str(values.get("ebook_ocr_prompt", "")).strip()
+    prompt_file_value = values.get("ebook_ocr_prompt_file")
+    ebook_ocr_prompt_file = _expanded_path(str(prompt_file_value)) if prompt_file_value else None
+    if ebook_ocr_prompt_file is not None and not ebook_ocr_prompt_file.is_file():
+        raise ConfigError(f"Ebook OCR prompt file does not exist: {ebook_ocr_prompt_file}")
+    callback_config_value = values.get("ebook_ocr_callback_config")
+    ebook_ocr_callback_config = (
+        _expanded_path(str(callback_config_value)) if callback_config_value else None
+    )
+    if ebook_ocr_callback_config is not None and not ebook_ocr_callback_config.is_file():
+        raise ConfigError(f"Ebook OCR callback config does not exist: {ebook_ocr_callback_config}")
+    ebook_ocr_callback = str(values.get("ebook_ocr_callback", "pro-ledin-ocr"))
+    ebook_restart_ocr = _boolean(values.get("ebook_restart_ocr"), "ebook_restart_ocr")
+    if ebook_image_policy != "ocr" and any(
+        (
+            ebook_ocr_prompt,
+            ebook_ocr_prompt_file,
+            callback_config_value,
+            ebook_restart_ocr,
+            ebook_ocr_callback != "pro-ledin-ocr",
+        )
+    ):
+        raise ConfigError("Ebook OCR options require ebook_image_policy=ocr")
+    external_approved = bool(values.get("external_processing_approved", True))
+    vision_url = str(values.get("vision_api_url", ""))
+    vision_key = str(values.get("vision_api_key", ""))
+    vision_model = str(values.get("vision_model", ""))
+    if ebook_image_policy == "ocr":
+        if bool(ebook_ocr_prompt) == bool(ebook_ocr_prompt_file):
+            raise ConfigError(
+                "ebook_image_policy=ocr requires exactly one ebook OCR prompt or prompt file"
+            )
+        if ebook_ocr_callback == "pro-ledin-ocr":
+            if not vision_url or not vision_key or not vision_model:
+                raise ConfigError(
+                    "Built-in ebook OCR requires MEDIA_IMPORT_VISION_API_URL, "
+                    "MEDIA_IMPORT_VISION_API_KEY, and MEDIA_IMPORT_VISION_MODEL"
+                )
+            if not external_approved:
+                raise ConfigError("External ebook OCR requires explicit approval")
 
     transcription_language = str(
         values.get("transcription_language", values.get("language", "auto"))
@@ -216,9 +316,6 @@ def load_config(
         )
     )
 
-    external_approved = bool(values.get("external_processing_approved", True))
-    vision_key = str(values.get("vision_api_key", ""))
-    vision_model = str(values.get("vision_model", ""))
     if ocr_engine == "vision":
         if not vision_key or not vision_model:
             raise ConfigError(
@@ -253,13 +350,27 @@ def load_config(
         layout=layout,
         path_map=path_map,
         office_fallback=office_fallback,
+        ebook_image_policy=ebook_image_policy,
+        ebook_mobi_backend=ebook_mobi_backend,
+        ebook_footnote_mode=ebook_footnote_mode,
+        ebook_ocr_prompt=ebook_ocr_prompt,
+        ebook_ocr_prompt_file=ebook_ocr_prompt_file,
+        ebook_ocr_callback=ebook_ocr_callback,
+        ebook_ocr_callback_config=ebook_ocr_callback_config,
+        ebook_ocr_timeout_seconds=_positive_int(
+            values.get("ebook_ocr_timeout_seconds"), "ebook_ocr_timeout_seconds", 300
+        ),
+        ebook_ocr_max_attempts=_positive_int(
+            values.get("ebook_ocr_max_attempts"), "ebook_ocr_max_attempts", 3
+        ),
+        ebook_restart_ocr=ebook_restart_ocr,
         language=str(values.get("language", "auto")),
         ocr_language=str(values.get("ocr_language", "auto")),
         ocr_engine=ocr_engine,
         ocr_timeout_seconds=_positive_int(
             values.get("ocr_timeout_seconds"), "ocr_timeout_seconds", 600
         ),
-        vision_api_url=str(values.get("vision_api_url", "")),
+        vision_api_url=vision_url,
         vision_api_key=vision_key,
         vision_model=vision_model,
         paddle_vl_server_url=paddle_url,

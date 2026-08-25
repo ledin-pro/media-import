@@ -6,6 +6,10 @@ and direct HTTP(S) media URLs into an Obsidian-compatible Markdown corpus.
 Docling is the sole media conversion engine. `pro-ledin-ocr` recognizes visual
 text in sampled video frames and image-based documents when needed.
 
+`pro-ledin-docling-ebook` converts EPUB, FB2, FB2.ZIP, FBZ, MOBI, AZW, and AZW3
+into native Docling documents. Ebook images can be referenced, skipped, or
+replaced with resumable OCR text.
+
 Whisper Turbo remains the default transcription route. Russian audio and video
 can optionally use the local GigaAM v3 provider supplied by `docling-gigaam`.
 
@@ -33,11 +37,12 @@ uv sync --extra dev
 uv run media-import --help
 ```
 
-The development configuration resolves `docling-gigaam` from the sibling
-`../docling-gigaam` checkout. Published installations can install it explicitly:
+The development configuration resolves `docling-gigaam` and
+`pro-ledin-docling-ebook` from sibling checkouts. Published installations can
+install them explicitly:
 
 ```bash
-python -m pip install 'docling-gigaam>=0.1,<0.2'
+python -m pip install 'docling-gigaam>=0.1,<0.2' 'pro-ledin-docling-ebook>=0.2,<0.3'
 ```
 
 The published `docling` package supplies standard document support, while
@@ -81,3 +86,15 @@ accepts `auto`, `ru`, `rus`, or `russian` and rejects other explicit languages.
 The checksum-verified official model downloads into the media-import cache on
 first real conversion. Long recordings use local Silero long-form processing.
 No API token is required.
+
+Ebooks default to referenced images:
+
+```bash
+media-import inspect ./books --vault-root ~/vault --output-dir sources/books \
+  --ebook-image-policy referenced
+```
+
+Use `--ebook-image-policy skip` to omit images. Use `ocr` to replace each image
+occurrence with recognized text; OCR requires `--ebook-ocr-prompt` (or prompt
+file), vision endpoint credentials, and explicit external-processing approval.
+MOBI/AZW/AZW3 additionally require `mobitool` or Calibre `ebook-convert`.

@@ -41,3 +41,15 @@ not supported by this provider.
 The importer does not overwrite an owned artifact whose hash differs from the
 previous manifest. Preserve the manual file, move it, or explicitly choose a new
 output directory before retrying.
+
+## Missing ebook backend
+
+Install `pro-ledin-docling-ebook>=0.2,<0.3` and rerun `inspect`. EPUB and FB2
+families need no external converter. MOBI, AZW, and AZW3 require `mobitool` or
+Calibre `ebook-convert`; `MEDIA_IMPORT_EBOOK_MOBI_BACKEND` can select one.
+
+Referenced ebook assets are owned individually through manifest hashes. Missing
+assets are regenerated, but modified assets produce a conflict and are never
+overwritten or removed. Ebook OCR requires a prompt plus vision URL, key, model,
+and external-processing approval. Use `MEDIA_IMPORT_EBOOK_RESTART_OCR=true` only
+when intentionally discarding an incompatible OCR checkpoint.

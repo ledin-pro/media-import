@@ -157,3 +157,64 @@ def test_gigaam_rejects_non_russian_language(tmp_path: Path) -> None:
             },
             environ={},
         )
+
+
+def test_ebook_defaults_to_referenced_images(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+        },
+        environ={},
+    )
+    assert config.ebook_image_policy == "referenced"
+    assert config.ebook_mobi_backend == "auto"
+
+
+def test_ebook_rejects_unknown_image_policy(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="Unsupported ebook_image_policy"):
+        load_config(
+            overrides={
+                "source": str(tmp_path),
+                "vault_root": tmp_path / "vault",
+                "output_dir": "out",
+                "ebook_image_policy": "embedded",
+            },
+            environ={},
+        )
+
+
+def test_ebook_ocr_requires_prompt(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="requires exactly one"):
+        load_config(
+            overrides={
+                "source": str(tmp_path),
+                "vault_root": tmp_path / "vault",
+                "output_dir": "out",
+                "ebook_image_policy": "ocr",
+            },
+            environ={},
+        )
+
+
+def test_ebook_ocr_redacts_prompt_and_api_key(tmp_path: Path) -> None:
+    config = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+            "ebook_image_policy": "ocr",
+            "ebook_ocr_prompt": "Read every label faithfully",
+            "external_processing_approved": True,
+        },
+        environ={
+            "MEDIA_IMPORT_VISION_API_URL": "https://vision.example/v1",
+            "MEDIA_IMPORT_VISION_API_KEY": "secret",
+            "MEDIA_IMPORT_VISION_MODEL": "vision-model",
+        },
+    )
+    public = config.public_dict()
+    assert "ebook_ocr_prompt" not in public
+    assert "ebook_ocr_prompt_sha256" in public
+    assert "secret" not in str(public)

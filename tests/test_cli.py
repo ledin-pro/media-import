@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from ebook_helpers import make_fb2
 
 from pro.ledin.media_import import cli
 from pro.ledin.media_import.config import Config, ConfigError
@@ -70,7 +71,7 @@ def test_resume_reuses_unchanged_output_and_removes_owned_stale_file(
     )
     calls = 0
 
-    def fake_process(item, items, resolved_config, output_root, progress=None):
+    def fake_process(item, items, resolved_config, output_root, progress=None, output_path=None):
         nonlocal calls
         calls += 1
         return (
@@ -121,7 +122,7 @@ def test_cross_format_exact_text_is_deduplicated(tmp_path: Path, monkeypatch) ->
         cache_dir=tmp_path / "cache",
     )
 
-    def fake_process(item, items, resolved_config, output_root, progress=None):
+    def fake_process(item, items, resolved_config, output_root, progress=None, output_path=None):
         return (
             f'---\nimporter: "media-import"\n---\n\n# {item.source_path}\n\nSame\n',
             {"status": "complete", "errors": [], "content_sha256": "same-hash"},
@@ -208,15 +209,53 @@ def test_cli_accepts_gigaam_provider() -> None:
     assert args.transcription_provider == "gigaam"
 
 
+def test_cli_accepts_ebook_options() -> None:
+    args = cli._parser().parse_args(
+        [
+            "inspect",
+            "book.fb2",
+            "--vault-root",
+            "/tmp/vault",
+            "--output-dir",
+            "books",
+            "--ebook-image-policy",
+            "ocr",
+            "--ebook-ocr-prompt",
+            "Read labels",
+        ]
+    )
+    assert args.ebook_image_policy == "ocr"
+    assert args.ebook_ocr_prompt == "Read labels"
+
+
+def test_compound_fb2_zip_uses_book_output_stem(tmp_path: Path) -> None:
+    config = Config(
+        source="book.fb2.zip",
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    item = SourceItem(
+        source_path="book.fb2.zip",
+        absolute_path=None,
+        source_uri=None,
+        kind="document",
+        extension=".fb2.zip",
+        mime_type="application/zip",
+        size=None,
+        mtime_ns=None,
+        sha256="hash",
+    )
+    assert cli._output_source_path(item, config) == "book.fb2"
+
+
 def test_compare_transcripts_subcommand_emits_json(tmp_path: Path, capsys) -> None:
     canonical = tmp_path / "canonical.md"
     variant = tmp_path / "variant.md"
     canonical.write_text("one two three " * 10, encoding="utf-8")
     variant.write_text("one two three " * 10, encoding="utf-8")
 
-    result = cli.main(
-        ["compare-transcripts", str(canonical), str(variant), "--json"]
-    )
+    result = cli.main(["compare-transcripts", str(canonical), str(variant), "--json"])
 
     assert result == 0
     assert json.loads(capsys.readouterr().out)["label"] == "full-equivalent"
@@ -234,7 +273,7 @@ def test_manifest_records_transcription_provider_and_model(tmp_path: Path, monke
         transcription_model="v3_e2e_rnnt",
     )
 
-    def fake_process(item, items, resolved_config, output_root, progress=None):
+    def fake_process(item, items, resolved_config, output_root, progress=None, output_path=None):
         return (
             '---\nimporter: "media-import"\n---\n\n# Transcript\n',
             {
@@ -288,7 +327,7 @@ def test_decision_selects_canonical_and_marks_other_media_duplicate(
     monkeypatch.setattr(
         cli,
         "_process_item",
-        lambda item, items, resolved_config, output_root, progress=None: (
+        lambda item, items, resolved_config, output_root, progress=None, output_path=None: (
             '---\nimporter: "media-import"\n---\n\nTranscript\n',
             {"status": "complete", "errors": []},
         ),
@@ -319,7 +358,7 @@ def test_mixed_type_collision_gets_separate_paths(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(
         cli,
         "_process_item",
-        lambda item, items, resolved_config, output_root, progress=None: (
+        lambda item, items, resolved_config, output_root, progress=None, output_path=None: (
             '---\nimporter: "media-import"\n---\n\nContent\n',
             {"status": "complete", "errors": []},
         ),
@@ -352,3 +391,133 @@ def test_password_protected_pdf_is_recorded_as_blocked(tmp_path: Path, monkeypat
     manifest = load_manifest(config.output_root / "manifest.json")
 
     assert manifest["items"][0]["status"] == "blocked"
+
+
+def test_referenced_ebook_import_writes_and_resumes_assets(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "book.fb2"
+    make_fb2(source)
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        ebook_image_policy="referenced",
+    )
+
+    first = cli._run_import(config, inventory(resolve_source(str(source))))
+    manifest = load_manifest(config.output_root / "manifest.json")
+    record = manifest["items"][0]
+    asset = config.output_root / record["assets"][0]["path"]
+    assert first["validation"]["status"] == "clean"
+    assert asset.is_file()
+
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should resume")),
+    )
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    resumed = load_manifest(config.output_root / "manifest.json")["items"][0]
+    assert resumed["resumed"] is True
+
+
+def test_modified_ebook_asset_is_not_overwritten(tmp_path: Path) -> None:
+    source = tmp_path / "book.fb2"
+    make_fb2(source)
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        ebook_image_policy="referenced",
+    )
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    manifest = load_manifest(config.output_root / "manifest.json")
+    asset = config.output_root / manifest["items"][0]["assets"][0]["path"]
+    asset.write_bytes(b"manual")
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    record = load_manifest(config.output_root / "manifest.json")["items"][0]
+
+    assert record["status"] == "conflict"
+    assert asset.read_bytes() == b"manual"
+
+
+def test_changing_ebook_policy_removes_only_managed_assets(tmp_path: Path) -> None:
+    source = tmp_path / "book.fb2"
+    make_fb2(source)
+    common = {
+        "source": str(source),
+        "vault_root": tmp_path / "vault",
+        "output_dir": Path("corpus"),
+        "cache_dir": tmp_path / "cache",
+    }
+    referenced = Config(**common, ebook_image_policy="referenced")
+    cli._run_import(referenced, inventory(resolve_source(str(source))))
+    manifest = load_manifest(referenced.output_root / "manifest.json")
+    managed = referenced.output_root / manifest["items"][0]["assets"][0]["path"]
+    user_file = managed.parent / "notes.txt"
+    user_file.write_text("keep", encoding="utf-8")
+
+    skipped = Config(**common, ebook_image_policy="skip")
+    cli._run_import(skipped, inventory(resolve_source(str(source))))
+
+    assert not managed.exists()
+    assert user_file.read_text(encoding="utf-8") == "keep"
+
+
+def test_ebook_ocr_error_redacts_prompt_and_api_key(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "book.fb2"
+    source.write_bytes(b"book")
+    prompt = "private recognition instructions"
+    api_key = "top-secret-key"
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        ebook_image_policy="ocr",
+        ebook_ocr_prompt=prompt,
+        vision_api_key=api_key,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError(f"provider failed for {prompt} using {api_key}")
+        ),
+    )
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    error = load_manifest(config.output_root / "manifest.json")["items"][0]["errors"][0]
+
+    assert prompt not in error
+    assert api_key not in error
+    assert error.count("[redacted]") == 2
+
+
+def test_ebook_ocr_error_redacts_normalized_prompt_file(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "book.fb2"
+    source.write_bytes(b"book")
+    prompt = "private file prompt"
+    prompt_file = tmp_path / "prompt.txt"
+    prompt_file.write_text(f"  {prompt}\n", encoding="utf-8")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+        ebook_image_policy="ocr",
+        ebook_ocr_prompt_file=prompt_file,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError(prompt)),
+    )
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+    error = load_manifest(config.output_root / "manifest.json")["items"][0]["errors"][0]
+
+    assert prompt not in error
+    assert error == "[redacted]"

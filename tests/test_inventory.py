@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 
 from pro.ledin.media_import.dedupe import exact_duplicate_groups
-from pro.ledin.media_import.inventory import inventory
+from pro.ledin.media_import.inventory import classify, inventory, source_extension
 from pro.ledin.media_import.progress import ProgressReporter
 from pro.ledin.media_import.sources import resolve_source
 
@@ -41,3 +41,20 @@ def test_inventory_reports_hashing_progress(tmp_path: Path) -> None:
     assert "phase=inventory status=start" in text
     assert "phase=inventory status=progress current=1 total=2" in text
     assert "phase=inventory status=complete" in text
+
+
+def test_all_ebook_extensions_are_documents(tmp_path: Path) -> None:
+    for name in (
+        "book.epub",
+        "book.fb2",
+        "book.fb2.zip",
+        "book.fbz",
+        "book.mobi",
+        "book.azw",
+        "book.azw3",
+    ):
+        path = tmp_path / name
+        path.touch()
+        assert classify(path) == "document"
+    assert source_extension(tmp_path / "book.fb2.zip") == ".fb2.zip"
+    assert classify(tmp_path / "ordinary.zip") == "archive"

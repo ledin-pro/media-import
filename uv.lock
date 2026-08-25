@@ -993,7 +993,7 @@ chunking = [
 
 [[package]]
 name = "docling-gigaam"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../docling-gigaam" }
 dependencies = [
     { name = "docling" },
@@ -3270,6 +3270,41 @@ wheels = [
 ]
 
 [[package]]
+name = "pro-ledin-docling-ebook"
+version = "0.2.0"
+source = { editable = "../docling-ebook" }
+dependencies = [
+    { name = "docling-slim" },
+    { name = "pillow" },
+    { name = "pro-ledin-ebook-import" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "docling-slim", specifier = ">=2.121,<3" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6" },
+    { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.25,<5" },
+    { name = "pillow", specifier = ">=10" },
+    { name = "pro-ledin-ebook-import", specifier = ">=0.3,<0.5" },
+    { name = "pro-ledin-ocr", marker = "extra == 'ocr'", specifier = ">=0.7,<0.8" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6" },
+]
+provides-extras = ["dev", "ocr"]
+
+[[package]]
+name = "pro-ledin-ebook-import"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defusedxml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/82/750a7f7760c254629fc74ca26ffeba0b83c7432be58d77b00080ed8887a3/pro_ledin_ebook_import-0.4.0.tar.gz", hash = "sha256:3ea385a7b8354c99f642d172fc1c573513ec8af179bc4acaaf8f3352048664e3", size = 37711, upload-time = "2026-08-25T09:40:28.217Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/c7/20f404b9026096af0cc5865f18c23a62322f2938b5d1d24161e86371caef/pro_ledin_ebook_import-0.4.0-py3-none-any.whl", hash = "sha256:1a2ed1b9a2b4fa025679bfa81079b14352d907612ea3299cb382f9c8788dd44b", size = 28532, upload-time = "2026-08-25T09:40:27.33Z" },
+]
+
+[[package]]
 name = "pro-ledin-media-import"
 version = "0.1.5"
 source = { editable = "." }
@@ -3277,6 +3312,7 @@ dependencies = [
     { name = "docling" },
     { name = "docling-gigaam" },
     { name = "docling-slim", extra = ["format-video"] },
+    { name = "pro-ledin-docling-ebook" },
     { name = "pro-ledin-ocr" },
     { name = "pyyaml" },
 ]
@@ -3305,6 +3341,7 @@ requires-dist = [
     { name = "markitdown", extras = ["docx", "xlsx", "pptx"], marker = "extra == 'office-fallback'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15" },
     { name = "openpyxl", marker = "extra == 'office-fallback'" },
+    { name = "pro-ledin-docling-ebook", editable = "../docling-ebook" },
     { name = "pro-ledin-ocr", editable = "../ocr" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
@@ -3315,7 +3352,7 @@ provides-extras = ["office-fallback", "docling-vlm", "dev"]
 
 [[package]]
 name = "pro-ledin-ocr"
-version = "0.6.1"
+version = "0.7.0"
 source = { editable = "../ocr" }
 dependencies = [
     { name = "camelot-py" },

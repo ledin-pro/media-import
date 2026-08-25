@@ -6,6 +6,7 @@ import shutil
 from dataclasses import asdict, dataclass
 
 from .config import Config
+from .ebook_documents import MOBI_EXTENSIONS, is_ebook_extension
 from .inventory import SourceItem
 
 
@@ -26,6 +27,7 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
     has_visual_media = any(
         item.extension in {".avi", ".mkv", ".mov", ".mp4", ".webm"} for item in items
     )
+    ebook_items = [item for item in items if is_ebook_extension(item.extension)]
 
     if importlib.util.find_spec("docling") is None:
         diagnostics.append(
@@ -36,6 +38,50 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
                 "docling",
             )
         )
+    if ebook_items:
+        try:
+            ebook_available = importlib.util.find_spec("pro.ledin.docling_ebook") is not None
+        except ModuleNotFoundError:
+            ebook_available = False
+        if not ebook_available:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "MISSING_DOCLING_EBOOK",
+                    "Install pro-ledin-docling-ebook>=0.2,<0.3 to import ebooks.",
+                    "pro-ledin-docling-ebook",
+                )
+            )
+        if any(item.extension in MOBI_EXTENSIONS for item in ebook_items):
+            required = {
+                "mobitool": ("mobitool",),
+                "calibre": ("ebook-convert",),
+                "auto": ("mobitool", "ebook-convert"),
+            }[config.ebook_mobi_backend]
+            if not any(shutil.which(executable) for executable in required):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "MISSING_EBOOK_MOBI_BACKEND",
+                        "MOBI/AZW import requires mobitool or Calibre ebook-convert.",
+                        " or ".join(required),
+                    )
+                )
+        if config.ebook_image_policy == "ocr" and config.ebook_ocr_callback != "pro-ledin-ocr":
+            module = config.ebook_ocr_callback.split(":", 1)[0]
+            try:
+                callback_available = bool(module) and importlib.util.find_spec(module) is not None
+            except (ImportError, ModuleNotFoundError):
+                callback_available = False
+            if not callback_available:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "MISSING_EBOOK_OCR_CALLBACK",
+                        f"Could not import ebook OCR callback module: {module}",
+                        module,
+                    )
+                )
     if has_media:
         for executable in ("ffmpeg", "ffprobe"):
             if shutil.which(executable) is None:

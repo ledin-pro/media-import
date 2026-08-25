@@ -40,3 +40,29 @@ def test_gigaam_preflight_reports_missing_package_without_importing(
 
     assert "docling_gigaam" in looked_up
     assert any(item.code == "MISSING_DOCLING_GIGAAM" for item in diagnostics)
+
+
+def test_mobi_preflight_requires_configured_backend(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    config = Config(
+        source="book.mobi",
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    item = SourceItem(
+        source_path="book.mobi",
+        absolute_path=tmp_path / "book.mobi",
+        source_uri=None,
+        kind="document",
+        extension=".mobi",
+        mime_type="application/x-mobipocket-ebook",
+        size=1,
+        mtime_ns=1,
+        sha256="hash",
+    )
+
+    diagnostics = run_preflight(config, [item], for_import=False)
+
+    assert any(item.code == "MISSING_EBOOK_MOBI_BACKEND" for item in diagnostics)
