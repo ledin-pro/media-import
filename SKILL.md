@@ -116,6 +116,14 @@ for more frequent inventory and OCR/ASR details.
   an explicit per-book choice after inventory before passing an ebook policy. For
   different choices in one source tree, use the per-book mapping file rather than
   collapsing them to one global policy.
+- Same-directory ebook files with the same basename (for example `.epub`, `.fb2`,
+  `.mobi`) are format variants of one book, not separate documents. The importer
+  selects one canonical source by `--ebook-format-preference`
+  (default `epub,fb2,mobi,azw3,azw,fbz,fb2.zip`) and reports the choice in
+  `ebook_variant_groups` during `inspect`/`--dry-run`. Content is not compared;
+  state that explicitly when reporting the plan. Do not ask a per-group question
+  for these; only ask if the user wants a different canonical format than the
+  default.
 - Ebook OCR requires a prompt and replaces pictures with faithful recognized text.
 - Auto-detect spoken and OCR languages.
 - Prefer a validated existing transcript; otherwise use Docling Whisper Turbo.
