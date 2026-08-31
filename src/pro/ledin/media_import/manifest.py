@@ -23,6 +23,7 @@ def new_manifest(config: dict[str, Any], source: dict[str, Any]) -> dict[str, An
         "source": source,
         "items": [],
         "duplicates": [],
+        "ebook_variant_groups": [],
         "validation": {"status": "pending", "errors": [], "warnings": []},
     }
 

@@ -172,6 +172,36 @@ def test_ebook_defaults_to_referenced_images(tmp_path: Path) -> None:
     assert config.ebook_mobi_backend == "auto"
 
 
+def test_ebook_format_preference_defaults_and_supports_custom_env_value(tmp_path: Path) -> None:
+    default = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+        },
+        environ={},
+    )
+    custom = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+        },
+        environ={"MEDIA_IMPORT_EBOOK_FORMAT_PREFERENCE": "mobi, epub"},
+    )
+
+    assert default.ebook_format_preference == (
+        "epub",
+        "fb2",
+        "mobi",
+        "azw3",
+        "azw",
+        "fbz",
+        "fb2.zip",
+    )
+    assert custom.ebook_format_preference == ("mobi", "epub")
+
+
 def test_ebook_rejects_unknown_image_policy(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="Unsupported ebook_image_policy"):
         load_config(

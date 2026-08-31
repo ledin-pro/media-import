@@ -30,6 +30,7 @@ OFFICE_FALLBACKS = {"none", "auto", "markitdown", "pandoc"}
 EBOOK_IMAGE_POLICIES = {"skip", "referenced", "ocr"}
 EBOOK_MOBI_BACKENDS = {"auto", "mobitool", "calibre"}
 EBOOK_FOOTNOTE_MODES = {"native", "inline"}
+EBOOK_FORMAT_PREFERENCE = ("epub", "fb2", "mobi", "azw3", "azw", "fbz", "fb2.zip")
 
 
 def _expanded_path(value: str) -> Path:
@@ -61,6 +62,33 @@ def _boolean(value: Any, name: str, default: bool = False) -> bool:
     raise ConfigError(f"{name} must be a boolean")
 
 
+def _ebook_format_preference(value: Any) -> tuple[str, ...]:
+    if value in (None, ""):
+        return EBOOK_FORMAT_PREFERENCE
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        raw_values = list(value)
+    else:
+        raise ConfigError(
+            "ebook_format_preference must be a comma-separated list or JSON array"
+        )
+
+    preference: list[str] = []
+    for raw_value in raw_values:
+        format_name = str(raw_value).strip().casefold().lstrip(".")
+        if not format_name:
+            raise ConfigError("ebook_format_preference cannot contain an empty format")
+        if format_name not in EBOOK_FORMAT_PREFERENCE:
+            raise ConfigError(f"Unsupported ebook format preference: {format_name}")
+        if format_name in preference:
+            raise ConfigError(
+                f"ebook_format_preference contains duplicate format: {format_name}"
+            )
+        preference.append(format_name)
+    return tuple(preference)
+
+
 @dataclass(frozen=True)
 class Config:
     source: str
@@ -74,6 +102,7 @@ class Config:
     office_fallback: str = "none"
     ebook_image_policy: str = "referenced"
     ebook_image_policies: dict[str, str] = field(default_factory=dict)
+    ebook_format_preference: tuple[str, ...] = EBOOK_FORMAT_PREFERENCE
     ebook_mobi_backend: str = "auto"
     ebook_footnote_mode: str = "native"
     ebook_ocr_prompt: str = ""
@@ -126,6 +155,7 @@ class Config:
         for key, value in list(data.items()):
             if isinstance(value, Path):
                 data[key] = str(value)
+        data["ebook_format_preference"] = list(self.ebook_format_preference)
         data["output_root"] = str(self.output_root)
         return data
 
@@ -143,6 +173,7 @@ ENV_MAP = {
     "layout": "MEDIA_IMPORT_LAYOUT",
     "office_fallback": "MEDIA_IMPORT_OFFICE_FALLBACK",
     "ebook_image_policy": "MEDIA_IMPORT_EBOOK_IMAGE_POLICY",
+    "ebook_format_preference": "MEDIA_IMPORT_EBOOK_FORMAT_PREFERENCE",
     "ebook_mobi_backend": "MEDIA_IMPORT_EBOOK_MOBI_BACKEND",
     "ebook_footnote_mode": "MEDIA_IMPORT_EBOOK_FOOTNOTE_MODE",
     "ebook_ocr_prompt": "MEDIA_IMPORT_EBOOK_OCR_PROMPT",
@@ -225,6 +256,7 @@ def load_config(
     office_fallback = str(values.get("office_fallback", "none"))
     ebook_image_policy = str(values.get("ebook_image_policy", "referenced"))
     raw_ebook_image_policies = values.get("ebook_image_policies", {})
+    ebook_format_preference = _ebook_format_preference(values.get("ebook_format_preference"))
     ebook_mobi_backend = str(values.get("ebook_mobi_backend", "auto"))
     ebook_footnote_mode = str(values.get("ebook_footnote_mode", "native"))
     provider = str(values.get("transcription_provider", "auto"))
@@ -373,6 +405,7 @@ def load_config(
         office_fallback=office_fallback,
         ebook_image_policy=ebook_image_policy,
         ebook_image_policies=ebook_image_policies,
+        ebook_format_preference=ebook_format_preference,
         ebook_mobi_backend=ebook_mobi_backend,
         ebook_footnote_mode=ebook_footnote_mode,
         ebook_ocr_prompt=ebook_ocr_prompt,

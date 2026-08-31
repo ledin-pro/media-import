@@ -11,6 +11,8 @@ must be selected.
   resolve to one path. Never merge these automatically.
 - `manual-edit`: an importer-owned output no longer matches its manifest hash.
 - `existing-output`: a prior output exists but no current source group explains it.
+- `ebook-variant`: same-directory ebook formats with one canonical source selected
+  by format preference. Content is not compared and no decision file is needed.
 
 ## Transcript Comparison
 

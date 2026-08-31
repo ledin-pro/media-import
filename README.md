@@ -110,3 +110,8 @@ occurrence with recognized text; OCR requires `--ebook-ocr-prompt` (or prompt
 file), vision endpoint credentials, and explicit external-processing approval.
 The same `--ebook-image-policies-file` must be passed to the confirmed import.
 MOBI/AZW/AZW3 additionally require `mobitool` or Calibre `ebook-convert`.
+
+Same-directory ebook files with the same basename are treated as format variants.
+The default canonical format order is `epub,fb2,mobi,azw3,azw,fbz,fb2.zip`; use
+`--ebook-format-preference` or `MEDIA_IMPORT_EBOOK_FORMAT_PREFERENCE` to change it.
+Variant content is not compared, and only the selected canonical source is converted.

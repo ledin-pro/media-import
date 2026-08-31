@@ -228,6 +228,23 @@ def test_cli_accepts_ebook_options() -> None:
     assert args.ebook_ocr_prompt == "Read labels"
 
 
+def test_cli_accepts_ebook_format_preference() -> None:
+    args = cli._parser().parse_args(
+        [
+            "inspect",
+            "books",
+            "--vault-root",
+            "/tmp/vault",
+            "--output-dir",
+            "books",
+            "--ebook-format-preference",
+            "mobi,epub",
+        ]
+    )
+
+    assert cli._overrides(args)["ebook_format_preference"] == "mobi,epub"
+
+
 def test_cli_accepts_per_source_ebook_image_policies(tmp_path: Path) -> None:
     policies = tmp_path / "policies.json"
     policies.write_text('{"book.epub": "skip"}', encoding="utf-8")
@@ -327,6 +344,96 @@ def test_same_basename_media_requires_decision_before_writing(tmp_path: Path) ->
         cli._run_import(config, inventory(resolve_source(str(source))))
 
     assert not config.output_root.exists()
+
+
+@pytest.mark.parametrize("command", ["inspect", "import"])
+def test_ebook_variants_are_reported_in_inspect_and_dry_run(
+    tmp_path: Path, monkeypatch, capsys, command: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "book.fb2.zip").write_bytes(b"fb2")
+    (source / "book.epub").write_bytes(b"epub")
+    vault = tmp_path / "vault"
+    monkeypatch.setattr(cli, "run_preflight", lambda config, items, for_import: [])
+
+    arguments = [
+        command,
+        str(source),
+        "--vault-root",
+        str(vault),
+        "--output-dir",
+        "books",
+    ]
+    if command == "import":
+        arguments.append("--dry-run")
+    arguments.append("--json")
+
+    result = cli.main(arguments)
+
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    group = report["ebook_variant_groups"][0]
+    assert group["canonical_source_path"] == "book.epub"
+    assert group["skipped_alternatives"] == ["book.fb2.zip"]
+    assert group["content_compared"] is False
+    assert "content was not compared" in group["warning"]
+    if command == "import":
+        assert report["unresolved_conflicts"] == []
+
+
+def test_confirmed_ebook_variant_import_writes_only_canonical_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "book.fb2").write_bytes(b"fb2")
+    (source / "book.epub").write_bytes(b"epub")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("books"),
+        cache_dir=tmp_path / "cache",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda item, items, resolved_config, output_root, progress=None, output_path=None: (
+            '---\nimporter: "media-import"\n---\n\n# Book\n',
+            {"status": "complete", "errors": []},
+        ),
+    )
+    monkeypatch.setattr(cli, "run_preflight", lambda config, items, for_import: [])
+
+    result = cli.main(
+        [
+            "import",
+            str(source),
+            "--vault-root",
+            str(config.vault_root),
+            "--output-dir",
+            str(config.output_dir),
+            "--confirmed",
+        ]
+    )
+
+    assert result == 0
+    manifest = load_manifest(config.output_root / "manifest.json")
+    records = {item["source_path"]: item for item in manifest["items"]}
+    assert records["book.epub"]["status"] == "complete"
+    assert records["book.fb2"]["status"] == "duplicate"
+    assert records["book.fb2"]["duplicate_reason"] == "ebook-variant"
+    assert records["book.fb2"]["canonical_source_path"] == "book.epub"
+    assert records["book.fb2"]["alias_of"] == "book.epub"
+    assert records["book.fb2"]["content_compared"] is False
+    assert "output_path" not in records["book.fb2"]
+    assert (config.output_root / "book.md").is_file()
+    content_outputs = sorted(
+        path.relative_to(config.output_root).as_posix()
+        for path in config.output_root.glob("*.md")
+        if path.name not in {"catalog.md", "index.md"}
+    )
+    assert content_outputs == ["book.md"]
 
 
 def test_decision_selects_canonical_and_marks_other_media_duplicate(

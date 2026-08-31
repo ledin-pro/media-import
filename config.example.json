@@ -6,6 +6,7 @@
   "office_fallback": "none",
   "ebook_image_policy": "referenced",
   "ebook_image_policies": {},
+  "ebook_format_preference": ["epub", "fb2", "mobi", "azw3", "azw", "fbz", "fb2.zip"],
   "ebook_mobi_backend": "auto",
   "ebook_footnote_mode": "native",
   "language": "auto",

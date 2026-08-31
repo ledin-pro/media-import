@@ -14,8 +14,15 @@ from pathlib import Path
 from typing import Any
 
 from .archives import download_archive, extract_archive, inspect_archive
-from .config import Config, ConfigError, load_config
-from .conflicts import analyze_conflicts, build_output_plan, normalized_output_path
+from .config import EBOOK_FORMAT_PREFERENCE, Config, ConfigError, load_config
+from .conflicts import (
+    EBOOK_VARIANT_WARNING,
+    analyze_conflicts,
+    build_output_plan,
+    ebook_variant_aliases,
+    ebook_variant_groups,
+    normalized_output_path,
+)
 from .dedupe import exact_duplicate_groups, normalized_text_hash
 from .docling_adapter import DocumentEvent, Track, iter_events
 from .docling_documents import convert_document, export_markdown
@@ -56,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
         child.add_argument("--frame-mode", choices=["none", "text", "text-and-images", "images"])
         child.add_argument("--ebook-image-policy", choices=["skip", "referenced", "ocr"])
         child.add_argument("--ebook-image-policies-file", type=Path)
+        child.add_argument("--ebook-format-preference")
         child.add_argument("--ebook-mobi-backend", choices=["auto", "mobitool", "calibre"])
         child.add_argument("--ebook-footnote-mode", choices=["native", "inline"])
         child.add_argument("--ebook-ocr-prompt")
@@ -110,6 +118,7 @@ def _overrides(args: argparse.Namespace) -> dict[str, Any]:
         "asset_mode",
         "frame_mode",
         "ebook_image_policy",
+        "ebook_format_preference",
         "ebook_mobi_backend",
         "ebook_footnote_mode",
         "ebook_ocr_prompt",
@@ -188,6 +197,8 @@ def _inspect(
         item.source_path: normalized_output_path(_output_source_path(item, config))
         for item in items
     }
+    ebook_variants = ebook_variant_groups(items, config.ebook_format_preference)
+    ebook_aliases = ebook_variant_aliases(ebook_variants)
     manifest: dict[str, Any] | None = None
     manifest_path = config.output_root / "manifest.json"
     if manifest_path.exists():
@@ -224,7 +235,8 @@ def _inspect(
         "destination": str(config.output_root),
         "counts": dict(sorted(counts.items())),
         "items": [item.public_dict() for item in items],
-        "duplicates": exact_duplicate_groups(items),
+        "duplicates": exact_duplicate_groups(items, config.ebook_format_preference),
+        "ebook_variant_groups": ebook_variants,
         "archives": archive_summaries,
         "diagnostics": [item.public_dict() for item in diagnostics],
         "would_write": ["index.md", "catalog.md", "manifest.json"],
@@ -234,7 +246,7 @@ def _inspect(
             candidate_paths,
             existing_manifest=manifest,
             output_root=config.output_root,
-            ignored_sources=associated_vtt,
+            ignored_sources=associated_vtt | set(ebook_aliases),
         ),
         "pdf_preflight": pdf_preflight,
         "ebooks": {
@@ -844,12 +856,15 @@ def _run_import(
     conflict_decisions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     output_root = config.output_root
-    duplicate_groups = exact_duplicate_groups(items)
+    ebook_variants = ebook_variant_groups(items, config.ebook_format_preference)
+    ebook_aliases = ebook_variant_aliases(ebook_variants)
+    duplicate_groups = exact_duplicate_groups(items, config.ebook_format_preference)
     duplicate_aliases = {
         alias: group["canonical"]
         for group in duplicate_groups
         for alias in group.get("aliases", [])
     }
+    duplicate_aliases.update(ebook_aliases)
     associated_vtt = {
         vtt.source_path: media.source_path
         for media in items
@@ -891,7 +906,11 @@ def _run_import(
         old_by_source = {
             str(item.get("source_path")): item for item in old_manifest.get("items", [])
         }
-        same_profile = old_manifest.get("config") == config.public_dict()
+        old_config_value = old_manifest.get("config")
+        old_config = dict(old_config_value) if isinstance(old_config_value, dict) else {}
+        if "ebook_format_preference" not in old_config:
+            old_config["ebook_format_preference"] = list(EBOOK_FORMAT_PREFERENCE)
+        same_profile = old_config == config.public_dict()
     else:
         old_by_source = {}
         same_profile = False
@@ -902,6 +921,7 @@ def _run_import(
             if item.get("kind") not in managed_kinds and not item.get("stale")
         )
     manifest["duplicates"] = duplicate_groups
+    manifest["ebook_variant_groups"] = ebook_variants
     content_canonicals = {
         str(item["content_sha256"]): str(item.get("output_path", ""))
         for item in old_by_source.values()
@@ -933,12 +953,24 @@ def _run_import(
             "errors": [],
         }
         if item.source_path in duplicate_aliases:
+            is_ebook_variant = item.source_path in ebook_aliases
             record.update(
                 {
                     "status": "duplicate",
-                    "canonical_source_path": duplicate_aliases[item.source_path],
+                    "canonical_source_path": ebook_aliases.get(
+                        item.source_path, duplicate_aliases[item.source_path]
+                    ),
                 }
             )
+            if is_ebook_variant:
+                record.update(
+                    {
+                        "duplicate_reason": "ebook-variant",
+                        "content_compared": False,
+                        "alias_of": ebook_aliases[item.source_path],
+                        "warnings": [EBOOK_VARIANT_WARNING],
+                    }
+                )
             manifest["items"].append(record)
             save_manifest(manifest_path, manifest, output_root)
             if progress:
@@ -1337,12 +1369,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.command == "import":
                 inspection["only"] = sorted(only)
                 decisions = _load_conflict_decisions(args.conflict_decisions)
-                duplicates = exact_duplicate_groups(items)
+                ebook_variants = ebook_variant_groups(items, config.ebook_format_preference)
+                ebook_aliases = ebook_variant_aliases(ebook_variants)
+                duplicates = exact_duplicate_groups(items, config.ebook_format_preference)
                 duplicate_aliases = {
                     alias: group["canonical"]
                     for group in duplicates
                     for alias in group.get("aliases", [])
                 }
+                duplicate_aliases.update(ebook_aliases)
                 associated_vtt = {
                     vtt.source_path: media.source_path
                     for media in items

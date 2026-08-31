@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from pro.ledin.media_import.conflicts import (
     _probe_media,
     analyze_conflicts,
+    ebook_variant_aliases,
+    ebook_variant_groups,
     normalized_output_path,
 )
+from pro.ledin.media_import.dedupe import exact_duplicate_groups
 from pro.ledin.media_import.inventory import SourceItem
 
 
@@ -78,6 +81,35 @@ def test_exact_duplicates_are_not_unresolved_conflicts() -> None:
     groups = analyze_conflicts(items, {item.source_path: "lecture.md" for item in items})
 
     assert groups == []
+
+
+def test_ebook_variants_group_by_directory_and_full_compound_suffix() -> None:
+    items = [
+        _item("fiction/book.fb2.zip", ".fb2.zip", kind="document"),
+        _item("fiction/book.epub", ".epub", kind="document"),
+        _item("reference/book.mobi", ".mobi", kind="document"),
+    ]
+
+    groups = ebook_variant_groups(items, ("fb2.zip", "epub", "mobi"))
+
+    assert len(groups) == 1
+    assert groups[0]["normalized_basename"] == "book"
+    assert groups[0]["canonical_source_path"] == "fiction/book.fb2.zip"
+    assert groups[0]["skipped_alternatives"] == ["fiction/book.epub"]
+    assert groups[0]["content_compared"] is False
+    assert "content was not compared" in groups[0]["warning"]
+    assert ebook_variant_aliases(groups) == {"fiction/book.epub": "fiction/book.fb2.zip"}
+
+
+def test_exact_hash_duplicate_prefers_ebook_format_order() -> None:
+    items = [
+        _item("book.azw", ".azw", kind="document", sha256="same"),
+        _item("book.azw3", ".azw3", kind="document", sha256="same"),
+    ]
+
+    groups = exact_duplicate_groups(items, ("azw3", "azw"))
+
+    assert groups[0]["canonical"] == "book.azw3"
 
 
 def test_probe_media_selects_audio_stream(tmp_path: Path, monkeypatch) -> None:

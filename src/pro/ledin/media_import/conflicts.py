@@ -3,13 +3,20 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import unicodedata
 from collections import defaultdict
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from .config import EBOOK_FORMAT_PREFERENCE
 from .inventory import SourceItem
 from .paths import safe_stem
+
+EBOOK_EXTENSIONS = {f".{format_name}" for format_name in EBOOK_FORMAT_PREFERENCE}
+EBOOK_VARIANT_WARNING = (
+    "Ebook variant content was not compared; canonical source was selected by format preference."
+)
 
 
 def normalized_output_path(relative_path: str) -> str:
@@ -17,6 +24,78 @@ def normalized_output_path(relative_path: str) -> str:
     parts = [safe_stem(part) for part in source.parts[:-1]]
     stem = safe_stem(source.stem)
     return "/".join((*parts, f"{stem}.md"))
+
+
+def _ebook_format_preference(preference: tuple[str, ...] | None) -> tuple[str, ...]:
+    selected = preference or EBOOK_FORMAT_PREFERENCE
+    normalized = tuple(value.casefold().lstrip(".") for value in selected)
+    return normalized + tuple(
+        value for value in EBOOK_FORMAT_PREFERENCE if value not in normalized
+    )
+
+
+def _ebook_variant_key(item: SourceItem) -> tuple[str, str] | None:
+    if item.extension.casefold() not in EBOOK_EXTENSIONS:
+        return None
+    path = Path(item.source_path)
+    extension = item.extension.casefold()
+    if not path.name.casefold().endswith(extension):
+        return None
+    basename = path.name[: -len(extension)]
+    normalized_basename = unicodedata.normalize("NFC", basename).casefold()
+    if not normalized_basename:
+        return None
+    return path.parent.as_posix(), normalized_basename
+
+
+def ebook_variant_groups(
+    items: list[SourceItem],
+    preference: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str], list[SourceItem]] = defaultdict(list)
+    for item in items:
+        key = _ebook_variant_key(item)
+        if key is not None:
+            groups[key].append(item)
+
+    ordered_preference = _ebook_format_preference(preference)
+    format_ranks = {value: index for index, value in enumerate(ordered_preference)}
+    result: list[dict[str, Any]] = []
+    for (directory, basename), group in sorted(groups.items()):
+        if len(group) < 2:
+            continue
+        canonical = min(
+            group,
+            key=lambda item: (
+                format_ranks.get(item.extension.casefold().lstrip("."), len(format_ranks)),
+                item.source_path.casefold(),
+            ),
+        )
+        alternatives = sorted(
+            (item.source_path for item in group if item.source_path != canonical.source_path),
+            key=str.casefold,
+        )
+        result.append(
+            {
+                "source_directory": directory,
+                "normalized_basename": basename,
+                "reason": "ebook-variant",
+                "canonical_source_path": canonical.source_path,
+                "canonical_source": canonical.source_path,
+                "skipped_alternatives": alternatives,
+                "content_compared": False,
+                "warning": EBOOK_VARIANT_WARNING,
+            }
+        )
+    return result
+
+
+def ebook_variant_aliases(groups: list[dict[str, Any]]) -> dict[str, str]:
+    return {
+        str(alternative): str(group["canonical_source_path"])
+        for group in groups
+        for alternative in group.get("skipped_alternatives", [])
+    }
 
 
 def _probe_media(item: SourceItem) -> dict[str, Any]:

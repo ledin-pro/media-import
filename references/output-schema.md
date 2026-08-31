@@ -23,5 +23,11 @@ Each ebook item records its effective `ebook_image_policy`; when policies differ
 within one source tree, the manifest configuration also records the
 `source_path`-to-policy mapping.
 
+Same-directory ebook format variants are reported in `ebook_variant_groups`. The
+selected source is imported; skipped alternatives are manifest items with
+`status: duplicate`, `duplicate_reason: ebook-variant`, `canonical_source_path`,
+and `alias_of`, with no output artifact. Their `content_compared` field is
+`false` because variant content is not compared.
+
 Visible media Markdown contains no timestamps. Timing remains in each manifest
 event under `track.start_time` and `track.end_time`.
