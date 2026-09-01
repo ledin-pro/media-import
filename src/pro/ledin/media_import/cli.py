@@ -764,14 +764,23 @@ def _process_item(
 
 
 def _write_indexes(output_root: Path, records: list[dict[str, Any]]) -> None:
-    rows = ["# Catalog", "", "| Kind | Source | Artifact | Status |", "| --- | --- | --- | --- |"]
+    rows = [
+        "# Catalog",
+        "",
+        "| Kind | Source | Artifact | Status | Duplicate of |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     for item in records:
         artifact = item.get("output_path")
         link = f"[[{Path(str(artifact)).with_suffix('').as_posix()}]]" if artifact else ""
         kind = item.get("kind", "")
         source_path = item.get("source_path", "")
         status = item.get("status", "")
-        rows.append(f"| {kind} | `{source_path}` | {link} | {status} |")
+        canonical = item.get("canonical_output_path")
+        canonical_link = (
+            f"[[{Path(str(canonical)).with_suffix('').as_posix()}]]" if canonical else ""
+        )
+        rows.append(f"| {kind} | `{source_path}` | {link} | {status} | {canonical_link} |")
     catalog = "\n".join(rows) + "\n"
     index = (
         "# Imported Corpus\n\n"

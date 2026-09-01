@@ -399,7 +399,7 @@ def test_confirmed_ebook_variant_import_writes_only_canonical_source(
         cli,
         "_process_item",
         lambda item, items, resolved_config, output_root, progress=None, output_path=None: (
-            '---\nimporter: "media-import"\n---\n\n# Book\n',
+            '---\nimporter: "media-import"\n---\n\n# Book\n\nSample content.\n',
             {"status": "complete", "errors": []},
         ),
     )

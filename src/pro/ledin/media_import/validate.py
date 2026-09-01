@@ -12,6 +12,17 @@ from .manifest import load_manifest, save_manifest
 
 EMBEDDED_WIKILINK = re.compile(r"!\[\[([^\]|#]+)")
 MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
+_FRONTMATTER = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
+
+
+def _body_is_empty(content: str) -> bool:
+    body = _FRONTMATTER.sub("", content, count=1)
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped == "---":
+            continue
+        return False
+    return True
 
 
 def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, Any]:
@@ -54,6 +65,8 @@ def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, 
         content = artifact.read_text(encoding="utf-8", errors="replace")
         if not content.startswith("---\n") or 'importer: "media-import"' not in content:
             errors.append(f"Invalid media-import frontmatter: {output_path}")
+        if _body_is_empty(content):
+            warnings.append(f"Empty body (no text beyond headings): {output_path}")
         expected_hash = item.get("output_sha256")
         actual_hash = sha256_file(artifact)
         if expected_hash and expected_hash != actual_hash:
