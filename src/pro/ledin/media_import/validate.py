@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+from .ebook_documents import EBOOK_EXTENSIONS
 from .inventory import sha256_file
 from .manifest import load_manifest, save_manifest
 
@@ -72,18 +73,23 @@ def validate_corpus(output_root: Path, source: Path | None = None) -> dict[str, 
             target = (artifact.parent / relative_link).resolve()
             if not target.is_relative_to(output_root.resolve()) or not target.exists():
                 errors.append(f"Broken Markdown image in {output_path}: {decoded}")
+        asset_label = (
+            "ebook"
+            if any(source_path.casefold().endswith(extension) for extension in EBOOK_EXTENSIONS)
+            else "managed"
+        )
         for asset in item.get("assets", []):
             asset_path = str(asset.get("path", ""))
             target = (output_root / asset_path).resolve()
             if not target.is_relative_to(output_root.resolve()):
-                errors.append(f"Ebook asset escapes corpus root: {asset_path}")
+                errors.append(f"{asset_label.capitalize()} asset escapes corpus root: {asset_path}")
                 continue
             if not target.is_file():
-                errors.append(f"Missing ebook asset: {asset_path}")
+                errors.append(f"Missing {asset_label} asset: {asset_path}")
                 continue
             expected_asset_hash = asset.get("sha256")
             if expected_asset_hash and sha256_file(target) != expected_asset_hash:
-                errors.append(f"Owned ebook asset was modified: {asset_path}")
+                errors.append(f"Owned {asset_label} asset was modified: {asset_path}")
 
     for required in ("index.md", "catalog.md"):
         if not (output_root / required).exists():

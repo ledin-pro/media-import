@@ -25,14 +25,19 @@ from .conflicts import (
 )
 from .dedupe import exact_duplicate_groups, normalized_text_hash
 from .docling_adapter import DocumentEvent, Track, iter_events
-from .docling_documents import convert_document, export_markdown
+from .docling_documents import (
+    convert_document,
+    export_markdown,
+    export_office_referenced_markdown,
+)
 from .docling_imports import load_docling_document
 from .docling_media import convert_media, release_media_memory
-from .ebook_documents import convert_ebook_document, is_ebook_extension
-from .environment import has_errors, run_preflight
+from .ebook_documents import EBOOK_EXTENSIONS, convert_ebook_document, is_ebook_extension
+from .environment import Diagnostic, has_errors, run_preflight
 from .inventory import SourceItem, inventory, sha256_file
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
 from .markdown import render_document_markdown, render_media_markdown, title_from_path
+from .office_security import REFERENCED_OFFICE_EXTENSIONS
 from .paths import atomic_write, output_path_for
 from .pdf_preflight import PdfPasswordRequired, inspect_pdf_encryption
 from .progress import ProgressReporter
@@ -181,6 +186,14 @@ def _safe_error_message(error: Exception, config: Config) -> str:
     for secret in sorted({value for value in secrets if value}, key=len, reverse=True):
         message = message.replace(secret, "[redacted]")
     return message
+
+
+def _asset_label(source_path: str) -> str:
+    return (
+        "Ebook"
+        if any(source_path.casefold().endswith(ext) for ext in EBOOK_EXTENSIONS)
+        else "Managed"
+    )
 
 
 def _inspect(
@@ -487,6 +500,7 @@ def _process_item(
     events: list[DocumentEvent] = []
     errors: list[str] = []
     cache_path: str | None = None
+    office_details: dict[str, Any] = {}
 
     if item.kind == "media":
         vtt = _matching_vtt(item, items)
@@ -648,7 +662,17 @@ def _process_item(
                 status, errors = _conversion_status(result)
                 document = result.document
                 cache_path = _cache_docling(document, item, config)
-                body = export_markdown(document)
+                if (
+                    item.extension in REFERENCED_OFFICE_EXTENSIONS
+                    and output_path is not None
+                    and hasattr(document, "save_as_markdown")
+                ):
+                    body, office_details = export_office_referenced_markdown(
+                        document, output_path, output_root
+                    )
+                else:
+                    body = export_markdown(document)
+                    office_details = {}
                 ebook_details = {}
                 route = str(getattr(result, "route", "docling"))
         except Exception:
@@ -678,6 +702,7 @@ def _process_item(
             "conversion_route": route,
         }
         details.update(ebook_details)
+        details.update(office_details)
         return render_document_markdown(
             title=title,
             metadata=_metadata(item, config, status, "document"),
@@ -848,12 +873,28 @@ def _remove_owned_assets(record: dict[str, Any], output_root: Path) -> tuple[int
     return removed, conflicts
 
 
+def _rollback_asset_writes(
+    writes: list[tuple[Path, bytes | None, bytes]],
+) -> None:
+    for path, previous, payload in reversed(writes):
+        try:
+            if not path.is_file() or path.read_bytes() != payload:
+                continue
+            if previous is None:
+                path.unlink()
+            else:
+                path.write_bytes(previous)
+        except OSError:
+            continue
+
+
 def _run_import(
     config: Config,
     items: list[SourceItem],
     managed_kinds: set[str] | None = None,
     progress: ProgressReporter | None = None,
     conflict_decisions: dict[str, str] | None = None,
+    preflight_diagnostics: list[Diagnostic] | None = None,
 ) -> dict[str, Any]:
     output_root = config.output_root
     ebook_variants = ebook_variant_groups(items, config.ebook_format_preference)
@@ -1018,6 +1059,7 @@ def _run_import(
                     source=item.source_path,
                 )
             continue
+        asset_writes: list[tuple[Path, bytes | None, bytes]] = []
         try:
             source_hash = item.sha256 or hashlib.sha256(item.source_path.encode()).hexdigest()
             planned_relative = planned_outputs[item.source_path]
@@ -1053,6 +1095,33 @@ def _run_import(
                         source=item.source_path,
                     )
                 continue
+            item_diagnostics = [
+                diagnostic
+                for diagnostic in preflight_diagnostics or []
+                if diagnostic.source_path == item.source_path and diagnostic.level == "error"
+            ]
+            if item_diagnostics:
+                record.update(
+                    {
+                        "status": "blocked",
+                        "diagnostics": [
+                            diagnostic.public_dict() for diagnostic in item_diagnostics
+                        ],
+                        "errors": [diagnostic.message for diagnostic in item_diagnostics],
+                    }
+                )
+                manifest["items"].append(record)
+                save_manifest(manifest_path, manifest, output_root)
+                if progress:
+                    progress.emit(
+                        "item",
+                        "complete",
+                        index=index,
+                        total=total,
+                        result="blocked",
+                        source=item.source_path,
+                    )
+                continue
             modified_assets = _modified_owned_assets(previous, output_root) if previous else []
             if previous and (
                 (
@@ -1065,7 +1134,9 @@ def _run_import(
                 errors = ["Existing owned output was modified; refusing to overwrite"]
                 if modified_assets:
                     errors = [
-                        "Existing owned ebook assets were modified; refusing to overwrite: "
+                        f"Existing owned {_asset_label(item.source_path).lower()} assets were "
+                        "modified; "
+                        "refusing to overwrite: "
                         + ", ".join(modified_assets)
                     ]
                 record.update(
@@ -1099,8 +1170,11 @@ def _run_import(
             finally:
                 if item.kind == "media":
                     release_media_memory()
+            asset_payloads = details.pop("_asset_payloads", [])
             content_hash = details.get("content_sha256")
             if item.kind == "document" and content_hash in content_canonicals:
+                for key in ("assets", "asset_dir", "office_image_mode"):
+                    details.pop(key, None)
                 record.update(details)
                 record.update(
                     {
@@ -1120,7 +1194,6 @@ def _run_import(
                         source=item.source_path,
                     )
                 continue
-            asset_payloads = details.pop("_asset_payloads", [])
             previous_assets = {
                 str(asset.get("path")): asset for asset in (previous or {}).get("assets", [])
             }
@@ -1142,7 +1215,8 @@ def _run_import(
                         "status": "conflict",
                         "output_path": relative_output,
                         "errors": [
-                            "Ebook asset path is occupied or modified; refusing to overwrite: "
+                        f"{_asset_label(item.source_path)} asset path is occupied or modified; "
+                        "refusing to overwrite: "
                             + ", ".join(asset_conflicts)
                         ],
                     }
@@ -1151,11 +1225,11 @@ def _run_import(
                 save_manifest(manifest_path, manifest, output_root)
                 continue
             for asset in asset_payloads:
-                atomic_write(
-                    output_root / str(asset["path"]),
-                    asset["data"],
-                    [output_root],
-                )
+                destination = output_root / str(asset["path"])
+                asset_payload = asset["data"]
+                previous_bytes = destination.read_bytes() if destination.is_file() else None
+                asset_writes.append((destination, previous_bytes, asset_payload))
+                atomic_write(destination, asset_payload, [output_root])
             atomic_write(output_path, text, [output_root])
             record.update(details)
             new_asset_paths = {str(asset.get("path")) for asset in details.get("assets", [])}
@@ -1170,7 +1244,8 @@ def _run_import(
                 _, obsolete_conflicts = _remove_owned_assets(obsolete, output_root)
                 if obsolete_conflicts:
                     record["warnings"].append(
-                        "Old ebook assets were modified and retained: "
+                        f"Old {_asset_label(item.source_path).lower()} assets were modified "
+                        "and retained: "
                         + ", ".join(obsolete_conflicts)
                     )
             if config.asset_mode == "copy" and item.absolute_path is not None:
@@ -1191,10 +1266,12 @@ def _run_import(
             if content_hash:
                 content_canonicals[str(content_hash)] = relative_output
         except PdfPasswordRequired as exc:
+            _rollback_asset_writes(asset_writes)
             record.update({"status": "blocked", "errors": [str(exc)]})
         except Exception as exc:
-            blocked = getattr(exc, "code", "") == "drm_unsupported" or type(exc).__name__ == (
-                "OcrCheckpointMismatchError"
+            _rollback_asset_writes(asset_writes)
+            blocked = getattr(exc, "code", "") in {"drm_unsupported", "missing_soffice"} or (
+                type(exc).__name__ == "OcrCheckpointMismatchError"
             )
             record.update(
                 {
@@ -1227,22 +1304,8 @@ def _run_import(
         stale_path = (output_root / str(previous["output_path"])).resolve()
         expected_hash = previous.get("output_sha256")
         stale_record = dict(previous)
-        modified_assets = _modified_owned_assets(previous, output_root)
-        if modified_assets:
-            stale_record.update(
-                {
-                    "status": "conflict",
-                    "stale": True,
-                    "errors": [
-                        "Stale ebook assets were modified; refusing to remove: "
-                        + ", ".join(modified_assets)
-                    ],
-                }
-            )
-            stale_conflicts += 1
-            manifest["items"].append(stale_record)
-            save_manifest(manifest_path, manifest, output_root)
-            continue
+        asset_label = _asset_label(str(previous.get("source_path", ""))).lower()
+        markdown_removed = False
         if (
             stale_path.exists()
             and expected_hash
@@ -1251,21 +1314,7 @@ def _run_import(
             in stale_path.read_text(encoding="utf-8", errors="replace")
         ):
             stale_path.unlink()
-            asset_removed, asset_conflicts = _remove_owned_assets(previous, output_root)
-            if asset_conflicts:
-                stale_record.update(
-                    {
-                        "status": "conflict",
-                        "stale": True,
-                        "errors": [
-                            "Stale ebook assets could not be removed: " + ", ".join(asset_conflicts)
-                        ],
-                    }
-                )
-                stale_conflicts += 1
-            else:
-                stale_record.update({"status": "removed", "stale": True})
-                stale_removed += 1 + asset_removed
+            markdown_removed = True
         elif stale_path.exists():
             stale_record.update(
                 {
@@ -1275,8 +1324,25 @@ def _run_import(
                 }
             )
             stale_conflicts += 1
+            manifest["items"].append(stale_record)
+            save_manifest(manifest_path, manifest, output_root)
+            continue
+        asset_removed, asset_conflicts = _remove_owned_assets(previous, output_root)
+        if asset_conflicts:
+            stale_record.update(
+                {
+                    "status": "conflict",
+                    "stale": True,
+                    "errors": [
+                        f"Stale {asset_label} assets could not be removed: "
+                        + ", ".join(asset_conflicts)
+                    ],
+                }
+            )
+            stale_conflicts += 1
         else:
             stale_record.update({"status": "removed", "stale": True})
+        stale_removed += int(markdown_removed) + asset_removed
         manifest["items"].append(stale_record)
         save_manifest(manifest_path, manifest, output_root)
     if progress:
@@ -1412,16 +1478,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             managed_kinds.update({"document", "docling"})
         items = [item for item in items if item.kind in managed_kinds or item.kind == "unsupported"]
         expanded_diagnostics = run_preflight(config, items, for_import=True)
-        if has_errors(expanded_diagnostics):
+        fatal_diagnostics = [
+            diagnostic
+            for diagnostic in expanded_diagnostics
+            if diagnostic.code != "MISSING_SOFFICE"
+        ]
+        if has_errors(fatal_diagnostics):
             _emit(
-                {"diagnostics": [item.public_dict() for item in expanded_diagnostics]},
+                {"diagnostics": [item.public_dict() for item in fatal_diagnostics]},
                 args.json_output,
             )
             return 3
         decisions = _load_conflict_decisions(args.conflict_decisions)
-        result = _run_import(config, items, managed_kinds, progress, decisions)
+        result = _run_import(
+            config,
+            items,
+            managed_kinds,
+            progress,
+            decisions,
+            expanded_diagnostics,
+        )
         _emit(result, args.json_output)
         validation_status = result["validation"]["status"]
+        imported_items = load_manifest(Path(result["manifest"])).get("items", [])
+        if any(
+            item.get("status") == "blocked"
+            and any(
+                diagnostic.get("code") == "MISSING_SOFFICE"
+                for diagnostic in item.get("diagnostics", [])
+            )
+            for item in imported_items
+        ):
+            return 3
         code = 2 if validation_status == "failed" else 1 if validation_status == "warning" else 0
         if args.fail_on_warning and code == 1:
             return 2

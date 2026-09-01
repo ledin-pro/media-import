@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import mimetypes
 import os
 import shutil
 import subprocess
@@ -11,7 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
-from .office_security import inspect_office_package
+from .office_security import (
+    LEGACY_OFFICE_EXTENSIONS,
+    REFERENCED_OFFICE_EXTENSIONS,
+    inspect_office_package,
+    require_soffice,
+)
+from .paths import is_within
 from .pdf_preflight import PdfPasswordRequired, decrypted_pdf, inspect_pdf_encryption
 from .progress import ProgressReporter
 
@@ -185,28 +193,31 @@ def convert_document(
     config: Config,
     progress: ProgressReporter | None = None,
 ) -> Any:
+    extension = Path(str(source).split("?", 1)[0]).suffix.casefold()
+    if extension in LEGACY_OFFICE_EXTENSIONS:
+        require_soffice()
+    if isinstance(source, Path) and extension in OCR_DOCUMENT_EXTENSIONS:
+        return _ocr_script(source, config, progress)
+    if isinstance(source, Path) and extension in REFERENCED_OFFICE_EXTENSIONS:
+        inspect_office_package(source)
     from docling.document_converter import DocumentConverter
 
-    if isinstance(source, Path) and source.suffix.casefold() in OCR_DOCUMENT_EXTENSIONS:
-        return _ocr_script(source, config, progress)
-    if isinstance(source, Path) and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}:
-        inspect_office_package(source)
     converter = DocumentConverter()
     try:
         result = converter.convert(source)
     except Exception as exc:
-        if isinstance(source, Path) and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}:
+        if isinstance(source, Path) and extension in REFERENCED_OFFICE_EXTENSIONS:
             return _fallback(source, config, exc)
         raise DoclingDocumentError(f"Docling document conversion failed: {exc}") from exc
     if result.document is None:
         error = DoclingDocumentError("Docling returned no document")
-        if isinstance(source, Path) and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}:
+        if isinstance(source, Path) and extension in REFERENCED_OFFICE_EXTENSIONS:
             return _fallback(source, config, error)
         raise error
     if (
         not str(result.document.export_to_markdown()).strip()
         and isinstance(source, Path)
-        and source.suffix.casefold() in {".docx", ".pptx", ".xlsx"}
+        and extension in REFERENCED_OFFICE_EXTENSIONS
     ):
         return _fallback(source, config, DoclingDocumentError("Docling returned empty output"))
     return result
@@ -214,3 +225,54 @@ def convert_document(
 
 def export_markdown(document: Any) -> str:
     return str(document.export_to_markdown()).strip()
+
+
+def export_office_referenced_markdown(
+    document: Any, output_path: Path, output_root: Path
+) -> tuple[str, dict[str, Any]]:
+    """Export a Docling Office document and stage its referenced images as assets."""
+    from docling_core.types.doc import ImageRefMode
+
+    asset_dir_name = f"{output_path.stem}_artifacts"
+    payloads: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="media-import-office-") as temporary:
+        temporary_root = Path(temporary).resolve()
+        temporary_markdown = temporary_root / output_path.name
+        temporary_assets = temporary_root / asset_dir_name
+        document.save_as_markdown(
+            temporary_markdown,
+            artifacts_dir=Path(asset_dir_name),
+            image_mode=ImageRefMode.REFERENCED,
+        )
+        body = temporary_markdown.read_text(encoding="utf-8")
+        for asset in sorted(temporary_assets.rglob("*")):
+            if not asset.is_file() or not is_within(asset, temporary_assets):
+                continue
+            relative_asset = asset.relative_to(temporary_assets)
+            if any(part in {"", ".", ".."} for part in relative_asset.parts):
+                raise ValueError(f"Unsafe Office asset path: {relative_asset}")
+            final_path = output_path.parent / asset_dir_name / relative_asset
+            if not is_within(final_path, output_root):
+                raise ValueError(f"Office asset escapes output root: {relative_asset}")
+            data = asset.read_bytes()
+            media_type = mimetypes.guess_type(asset.name)[0]
+            payloads.append(
+                {
+                    "path": final_path.relative_to(output_root).as_posix(),
+                    "data": data,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data),
+                    "media_type": media_type,
+                }
+            )
+
+    details = {
+        "asset_dir": (output_path.parent / asset_dir_name).relative_to(output_root).as_posix(),
+        "assets": [
+            {key: value for key, value in payload.items() if key != "data"}
+            for payload in payloads
+        ],
+        "_asset_payloads": payloads,
+        "office_image_mode": ImageRefMode.REFERENCED.value,
+    }
+    return body.strip(), details

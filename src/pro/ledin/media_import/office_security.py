@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -7,16 +8,38 @@ from pathlib import Path, PurePosixPath
 MAX_OFFICE_MEMBERS = 10_000
 MAX_OFFICE_BYTES = 4 * 1024 * 1024 * 1024
 MAX_OFFICE_EXPANSION_RATIO = 200
+LEGACY_OFFICE_EXTENSIONS = {".doc", ".xls", ".ppt"}
+REFERENCED_OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 
 
 class OfficeSecurityError(ValueError):
     """Raised when an Office container contains unsafe active content."""
 
 
+class OfficeDependencyError(RuntimeError):
+    """Raised when a required Office conversion dependency is unavailable."""
+
+    code = "missing_soffice"
+
+
 @dataclass(frozen=True)
 class OfficeInspection:
     members: int
     uncompressed_bytes: int
+
+
+def find_soffice() -> str | None:
+    """Return the installed LibreOffice command, if available."""
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+def require_soffice() -> str:
+    executable = find_soffice()
+    if executable is None:
+        raise OfficeDependencyError(
+            "Legacy Office import requires LibreOffice (soffice); install LibreOffice and retry"
+        )
+    return executable
 
 
 def inspect_office_package(path: Path) -> OfficeInspection:

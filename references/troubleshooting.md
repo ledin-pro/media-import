@@ -53,3 +53,11 @@ assets are regenerated, but modified assets produce a conflict and are never
 overwritten or removed. Ebook OCR requires a prompt plus vision URL, key, model,
 and external-processing approval. Use `MEDIA_IMPORT_EBOOK_RESTART_OCR=true` only
 when intentionally discarding an incompatible OCR checkpoint.
+
+## Missing LibreOffice
+
+Legacy `.doc`, `.xls`, and `.ppt` items require the `soffice` executable. Install
+LibreOffice and rerun `inspect`; missing availability is reported per item as
+`MISSING_SOFFICE`, and confirmed imports block those items without writing an
+artifact. Modern DOCX/XLSX/PPTX files do not require LibreOffice and export
+Docling images as managed referenced assets.

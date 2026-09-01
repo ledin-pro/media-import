@@ -66,3 +66,34 @@ def test_mobi_preflight_requires_configured_backend(tmp_path: Path, monkeypatch)
     diagnostics = run_preflight(config, [item], for_import=False)
 
     assert any(item.code == "MISSING_EBOOK_MOBI_BACKEND" for item in diagnostics)
+
+
+def test_legacy_office_preflight_reports_missing_soffice_per_item(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    config = Config(
+        source="legacy.doc",
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    item = SourceItem(
+        source_path="legacy.doc",
+        absolute_path=tmp_path / "legacy.doc",
+        source_uri=None,
+        kind="document",
+        extension=".doc",
+        mime_type="application/msword",
+        size=1,
+        mtime_ns=1,
+        sha256="hash",
+    )
+
+    diagnostics = run_preflight(config, [item], for_import=False)
+
+    missing = next(item for item in diagnostics if item.code == "MISSING_SOFFICE")
+    assert missing.level == "error"
+    assert missing.source_path == "legacy.doc"
+    assert missing.missing_component == "soffice"

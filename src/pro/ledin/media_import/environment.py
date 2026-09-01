@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from .config import Config
 from .ebook_documents import MOBI_EXTENSIONS, is_ebook_extension
 from .inventory import SourceItem
+from .office_security import LEGACY_OFFICE_EXTENSIONS, find_soffice
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class Diagnostic:
     code: str
     message: str
     missing_component: str | None = None
+    source_path: str | None = None
 
     def public_dict(self) -> dict[str, str | None]:
         return asdict(self)
@@ -28,6 +30,9 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
         item.extension in {".avi", ".mkv", ".mov", ".mp4", ".webm"} for item in items
     )
     ebook_items = [item for item in items if is_ebook_extension(item.extension)]
+    legacy_office_items = [
+        item for item in items if item.extension in LEGACY_OFFICE_EXTENSIONS
+    ]
 
     if importlib.util.find_spec("docling") is None:
         diagnostics.append(
@@ -85,6 +90,17 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
                         module,
                     )
                 )
+    if legacy_office_items and find_soffice() is None:
+        diagnostics.extend(
+            Diagnostic(
+                "error",
+                "MISSING_SOFFICE",
+                "Legacy Office import requires LibreOffice (soffice).",
+                "soffice",
+                item.source_path,
+            )
+            for item in legacy_office_items
+        )
     if has_media:
         for executable in ("ffmpeg", "ffprobe"):
             if shutil.which(executable) is None:

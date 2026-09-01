@@ -19,6 +19,12 @@ removes only unchanged owned assets. Ebook OCR checkpoints live under the cache
 directory and are recorded for diagnostics, but are not required for corpus
 validity after the final Markdown has been written.
 
+DOCX, XLSX, and PPTX document items use the same managed-assets contract when
+Docling exports their images with `ImageRefMode.REFERENCED`. Their manifest
+records `asset_dir` and `assets` entries with `path`, `sha256`, `size`, and
+`media_type`; resume, conflict handling, stale cleanup, and validation apply to
+these assets as they do to ebook assets.
+
 Each ebook item records its effective `ebook_image_policy`; when policies differ
 within one source tree, the manifest configuration also records the
 `source_path`-to-policy mapping.
