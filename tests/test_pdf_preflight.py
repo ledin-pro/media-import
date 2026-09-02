@@ -67,7 +67,7 @@ def test_pdf_preflight_maps_qpdf_status(
     tmp_path: Path, monkeypatch, returncode: int, status: str
 ) -> None:
     source = tmp_path / "document.pdf"
-    source.write_bytes(b"pdf")
+    source.write_bytes(b"%PDF-1.7\n")
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/qpdf")
     monkeypatch.setattr(
         "subprocess.run",

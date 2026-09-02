@@ -22,6 +22,16 @@ def inspect_pdf_encryption(path: Path) -> dict[str, Any]:
     if qpdf is None:
         return {"status": "unavailable", "tool": "qpdf", "error": "qpdf is not installed"}
     try:
+        with path.open("rb") as source:
+            if source.read(5) != b"%PDF-":
+                return {
+                    "status": "unreadable",
+                    "tool": "qpdf",
+                    "error": "file does not have a PDF header",
+                }
+    except OSError as exc:
+        return {"status": "error", "tool": "qpdf", "error": str(exc)}
+    try:
         completed = subprocess.run(
             [qpdf, "--requires-password", str(path)],
             capture_output=True,
