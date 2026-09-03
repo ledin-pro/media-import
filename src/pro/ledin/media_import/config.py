@@ -131,6 +131,20 @@ class Config:
     external_processing_approved: bool = True
     jobs: int = 1
     verbose: bool = False
+    # These fields carry per-item routing context.  They are deliberately
+    # omitted from public_dict() so the manifest's top-level config remains the
+    # requested configuration rather than the route chosen for one item.
+    _route_requested_provider: str | None = field(default=None, repr=False, compare=False)
+    _route_requested_model: str | None = field(default=None, repr=False, compare=False)
+    _route_requested_language: str | None = field(default=None, repr=False, compare=False)
+    _route_detected_language: str | None = field(default=None, repr=False, compare=False)
+    _route_confidence: float | None = field(default=None, repr=False, compare=False)
+    _route_sample_count: int | None = field(default=None, repr=False, compare=False)
+    _route_status: str | None = field(default=None, repr=False, compare=False)
+    _route_method: str | None = field(default=None, repr=False, compare=False)
+    _route_reason: str | None = field(default=None, repr=False, compare=False)
+    _route_warnings: tuple[str, ...] = field(default_factory=tuple, repr=False, compare=False)
+    _route_auto_detected: bool = field(default=False, repr=False, compare=False)
 
     @property
     def output_root(self) -> Path:
@@ -138,6 +152,9 @@ class Config:
 
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        for key in tuple(data):
+            if key.startswith("_route_"):
+                data.pop(key)
         data.pop("vision_api_key", None)
         prompt = data.pop("ebook_ocr_prompt", "")
         if prompt:

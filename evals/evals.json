@@ -16,12 +16,12 @@
     {
       "id": 2,
       "prompt": "Archive https://example.com/talk.mp4 as searchable Markdown in ~/vault/sources/talk. This Mac is Apple Silicon and I want local processing only.",
-      "expected_output": "The agent selects Docling media conversion, keeps remote services disabled, uses the auto MLX Whisper Turbo route on Apple Silicon, and follows the dry-run confirmation gate.",
+      "expected_output": "The agent selects Docling media conversion, keeps remote services disabled, preserves transcription provider auto for confirmed local language detection and routing, and follows the dry-run confirmation gate.",
       "files": [],
       "assertions": [
         "Uses Docling as the media engine",
         "Uses external processing by default without requiring a CLI approval flag",
-        "Uses the Apple Silicon MLX auto route",
+        "Keeps provider auto so confirmed import can detect language and select the local route",
         "Does not expose timestamps in generated Markdown"
       ]
     },

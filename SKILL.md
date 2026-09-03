@@ -126,8 +126,12 @@ for more frequent inventory and OCR/ASR details.
   default.
 - Ebook OCR requires a prompt and replaces pictures with faithful recognized text.
 - Auto-detect spoken and OCR languages.
-- Prefer a validated existing transcript; otherwise use Docling Whisper Turbo.
-- Keep Whisper Turbo as the default; select provider `gigaam` only for Russian media.
+- Prefer a validated existing transcript; otherwise keep transcription provider `auto`.
+- During a confirmed import, `auto` detects spoken language from short samples across the media.
+- Confident Russian routes to local GigaAM v3; other, mixed, or uncertain language stays on
+  Docling Whisper Turbo. If GigaAM is unavailable, Russian falls back to Whisper with a warning.
+- Use an explicit provider only when the user asks to force one; report the resolved provider and
+  detected language from the final manifest rather than inferring them from the requested config.
 - GigaAM defaults to `v3_e2e_rnnt` and accepts `auto`, `ru`, `rus`, or `russian`.
 - On Apple Silicon, Docling's auto preset selects MLX Whisper.
 - Keep timestamps in the manifest, not in visible Markdown.

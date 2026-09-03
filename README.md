@@ -10,8 +10,11 @@ text in sampled video frames and image-based documents when needed.
 into native Docling documents. Ebook images can be referenced, skipped, or
 replaced with resumable OCR text.
 
-Whisper Turbo remains the default transcription route. Russian audio and video
-can optionally use the local GigaAM v3 provider supplied by `docling-gigaam`.
+Whisper Turbo remains the default transcription route. With
+`transcription_provider=auto`, the importer samples several short windows across
+the media and routes confidently Russian material to local GigaAM v3; uncertain
+or mixed-language material stays on Docling's multilingual Whisper route. Russian
+auto-routing falls back to Whisper with a warning when GigaAM is unavailable.
 
 ## Install
 
@@ -47,8 +50,11 @@ python -m pip install 'docling-gigaam>=0.1,<0.2' 'pro-ledin-docling-ebook>=0.2,<
 
 The published `docling` package supplies standard document support, while
 `docling-slim[format-video]` supplies the current video/ASR dependencies.
-Docling media conversion also requires `ffmpeg` and `ffprobe`. Model downloads
-are never started by `inspect` or `--dry-run`.
+The platform-appropriate Whisper backend is declared directly because it is also
+used by the automatic language detector: MLX Whisper on Apple Silicon and native
+Whisper on supported non-Apple Python versions. Docling media conversion and
+language sampling require `ffmpeg` and `ffprobe`. Model downloads are never
+started by `inspect` or `--dry-run`.
 
 ## Workflow
 

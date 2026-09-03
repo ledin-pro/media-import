@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .archives import download_archive, extract_archive, inspect_archive
 from .config import EBOOK_FORMAT_PREFERENCE, Config, ConfigError, load_config
@@ -35,6 +35,7 @@ from .docling_media import convert_media, release_media_memory
 from .ebook_documents import EBOOK_EXTENSIONS, convert_ebook_document, is_ebook_extension
 from .environment import Diagnostic, has_errors, run_preflight
 from .inventory import SourceItem, inventory, sha256_file
+from .language_routing import resolve_media_route
 from .manifest import load_manifest, new_manifest, save_manifest, status_counts
 from .markdown import render_document_markdown, render_media_markdown, title_from_path
 from .office_security import REFERENCED_OFFICE_EXTENSIONS
@@ -383,7 +384,7 @@ def _output_source_path(item: SourceItem, config: Config) -> str:
 
 
 def _metadata(item: SourceItem, config: Config, status: str, content_kind: str) -> dict[str, Any]:
-    return {
+    metadata = {
         "type": "source",
         "source": Path(config.source).name or config.source,
         "content_kind": content_kind,
@@ -402,6 +403,35 @@ def _metadata(item: SourceItem, config: Config, status: str, content_kind: str) 
         if content_kind == "media_transcript"
         else None,
         "original_format": item.extension.lstrip("."),
+    }
+    if content_kind == "media_transcript":
+        metadata.update(_route_fields(config))
+    return metadata
+
+
+def _route_fields(config: Config) -> dict[str, Any]:
+    """Expose requested and resolved media routing without changing old fields."""
+
+    requested_provider = config._route_requested_provider or config.transcription_provider
+    requested_model = config._route_requested_model or config.transcription_model
+    requested_language = config._route_requested_language or config.transcription_language
+    status = config._route_status
+    method = config._route_method
+    return {
+        "requested_transcription_provider": requested_provider,
+        "resolved_transcription_provider": config.transcription_provider,
+        "requested_transcription_model": requested_model,
+        "resolved_transcription_model": config.transcription_model,
+        "requested_transcription_language": requested_language,
+        "resolved_transcription_language": config.transcription_language,
+        "detected_language": config._route_detected_language,
+        "detection_confidence": config._route_confidence,
+        "detection_sample_count": config._route_sample_count,
+        "detection_status": status,
+        "detection_method": method,
+        "transcription_route_reason": config._route_reason,
+        "route_warnings": list(config._route_warnings),
+        "auto_routed": config._route_auto_detected,
     }
 
 
@@ -897,6 +927,19 @@ def _rollback_asset_writes(
             continue
 
 
+def _auto_route_matches(previous: dict[str, Any], config: Config) -> bool:
+    """Legacy auto records without a resolved route are never resumable."""
+
+    if not config._route_auto_detected:
+        return True
+    expected = {
+        "resolved_transcription_provider": config.transcription_provider,
+        "resolved_transcription_language": config.transcription_language,
+        "resolved_transcription_model": config.transcription_model,
+    }
+    return all(key in previous and previous[key] == value for key, value in expected.items())
+
+
 def _run_import(
     config: Config,
     items: list[SourceItem],
@@ -910,9 +953,9 @@ def _run_import(
     ebook_aliases = ebook_variant_aliases(ebook_variants)
     duplicate_groups = exact_duplicate_groups(items, config.ebook_format_preference)
     duplicate_aliases = {
-        alias: group["canonical"]
+        alias: cast(str, group["canonical"])
         for group in duplicate_groups
-        for alias in group.get("aliases", [])
+        for alias in cast(list[str], group.get("aliases", []))
     }
     duplicate_aliases.update(ebook_aliases)
     associated_vtt = {
@@ -1080,6 +1123,42 @@ def _run_import(
                 output_path = output_path_for(planned_relative, output_root, source_hash)
             relative_output = output_path.relative_to(output_root).as_posix()
             previous = old_by_source.get(item.source_path)
+            resolved_config = config
+            route_diagnostics: list[Diagnostic] = []
+            if item.kind == "media":
+                vtt = _matching_vtt(item, items)
+                reusable_vtt = (
+                    vtt is not None
+                    and vtt.absolute_path is not None
+                    and config.transcription_policy != "force"
+                )
+                resolved_config = resolve_media_route(
+                    _source_value(item),
+                    config,
+                    media_sha256=item.sha256,
+                    reusable_vtt=reusable_vtt,
+                )
+                route = _route_fields(resolved_config)
+                record.update(route)
+                record["warnings"].extend(resolved_config._route_warnings)
+                if (
+                    config.transcription_provider == "auto"
+                    and (
+                        resolved_config.transcription_provider != config.transcription_provider
+                        or resolved_config.transcription_language != config.transcription_language
+                        or resolved_config.transcription_model != config.transcription_model
+                    )
+                ):
+                    route_diagnostics = run_preflight(
+                        resolved_config,
+                        [item],
+                        for_import=True,
+                    )
+                    record["warnings"].extend(
+                        diagnostic.message
+                        for diagnostic in route_diagnostics
+                        if diagnostic.level == "warning"
+                    )
             if (
                 same_profile
                 and previous
@@ -1089,6 +1168,7 @@ def _run_import(
                 and output_path.exists()
                 and sha256_file(output_path) == previous["output_sha256"]
                 and _owned_assets_match(previous, output_root)
+                and _auto_route_matches(previous, resolved_config)
             ):
                 reused = dict(previous)
                 reused["resumed"] = True
@@ -1109,6 +1189,9 @@ def _run_import(
                 for diagnostic in preflight_diagnostics or []
                 if diagnostic.source_path == item.source_path and diagnostic.level == "error"
             ]
+            item_diagnostics.extend(
+                diagnostic for diagnostic in route_diagnostics if diagnostic.level == "error"
+            )
             if item_diagnostics:
                 record.update(
                     {
@@ -1171,7 +1254,7 @@ def _run_import(
                 text, details = _process_item(
                     item,
                     items,
-                    config,
+                    resolved_config,
                     output_root,
                     progress,
                     output_path,
@@ -1241,6 +1324,8 @@ def _run_import(
                 atomic_write(destination, asset_payload, [output_root])
             atomic_write(output_path, text, [output_root])
             record.update(details)
+            if item.kind == "media":
+                record.update(_route_fields(resolved_config))
             new_asset_paths = {str(asset.get("path")) for asset in details.get("assets", [])}
             if previous:
                 obsolete = {
@@ -1448,9 +1533,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ebook_aliases = ebook_variant_aliases(ebook_variants)
                 duplicates = exact_duplicate_groups(items, config.ebook_format_preference)
                 duplicate_aliases = {
-                    alias: group["canonical"]
+                    alias: cast(str, group["canonical"])
                     for group in duplicates
-                    for alias in group.get("aliases", [])
+                    for alias in cast(list[str], group.get("aliases", []))
                 }
                 duplicate_aliases.update(ebook_aliases)
                 associated_vtt = {

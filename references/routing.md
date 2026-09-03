@@ -12,6 +12,15 @@ Reuse values already present in the request for other decisions.
 Defaults are `mirror`, `reference`, `text`, `auto`, `prefer-existing`, and
 external processing approved.
 
+`transcription_provider=auto` is the only automatic provider setting. During a
+confirmed import, media without a reusable VTT is checked with five targeted
+mono 16 kHz Whisper samples of about 25 seconds spread across the duration.
+Confident Russian routes to `gigaam` with `ru` and `v3_e2e_rnnt`; confident
+non-Russian routes to Docling Whisper with its detected language; uncertain or
+mixed samples keep Whisper language `auto`. If GigaAM is unavailable, Russian
+media stays on Whisper and records a warning. Inspect and dry-run do not load a
+language model.
+
 ## Commands
 
 1. `media-import inspect SOURCE --vault-root PATH --output-dir RELATIVE --json`

@@ -196,5 +196,23 @@ def run_preflight(config: Config, items: list[SourceItem], *, for_import: bool) 
     return diagnostics
 
 
+def gigaam_route_available(config: Config) -> tuple[bool, str]:
+    """Return whether an automatic route may select GigaAM without crashing."""
+
+    try:
+        if importlib.util.find_spec("docling_gigaam") is None:
+            return False, "docling-gigaam is not installed"
+    except (ImportError, ModuleNotFoundError):
+        return False, "docling-gigaam is not importable"
+    try:
+        if importlib.util.find_spec("torch") is None:
+            return False, "the PyTorch runtime is not installed"
+    except (ImportError, ModuleNotFoundError):
+        return False, "the PyTorch runtime is not importable"
+    if config.docling_device.casefold() == "mlx":
+        return False, "GigaAM does not support the MLX device"
+    return True, "available"
+
+
 def has_errors(diagnostics: list[Diagnostic]) -> bool:
     return any(item.level == "error" for item in diagnostics)

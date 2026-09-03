@@ -128,7 +128,9 @@ def _probe_media(item: SourceItem) -> dict[str, Any]:
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         return {"metadata_error": str(exc)}
     streams = data.get("streams") or []
-    audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), {})
+    audio: dict[str, Any] = next(
+        (stream for stream in streams if stream.get("codec_type") == "audio"), {}
+    )
     duration = (data.get("format") or {}).get("duration")
     result: dict[str, Any] = {}
     if duration is not None:

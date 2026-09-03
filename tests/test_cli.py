@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -326,6 +327,86 @@ def test_manifest_records_transcription_provider_and_model(tmp_path: Path, monke
     assert manifest["config"]["transcription_model"] == "v3_e2e_rnnt"
     assert manifest["items"][0]["transcription_provider"] == "gigaam"
     assert manifest["items"][0]["transcription_model"] == "v3_e2e_rnnt"
+    assert manifest["items"][0]["requested_transcription_provider"] == "gigaam"
+    assert manifest["items"][0]["resolved_transcription_provider"] == "gigaam"
+
+
+def test_auto_route_change_invalidates_resume(tmp_path: Path) -> None:
+    config = Config(
+        source="source.wav",
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    russian = replace(
+        config,
+        transcription_provider="gigaam",
+        transcription_model="v3_e2e_rnnt",
+        transcription_language="ru",
+        _route_auto_detected=True,
+    )
+    previous = {
+        "resolved_transcription_provider": "auto",
+        "resolved_transcription_model": "whisper_turbo",
+        "resolved_transcription_language": "en",
+    }
+
+    assert cli._auto_route_matches(previous, russian) is False
+    assert cli._auto_route_matches({}, russian) is False
+
+
+def test_manifest_keeps_requested_auto_and_records_resolved_route(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"audio")
+    config = Config(
+        source=str(source),
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+    routed = replace(
+        config,
+        transcription_provider="gigaam",
+        transcription_model="v3_e2e_rnnt",
+        transcription_language="ru",
+        _route_requested_provider="auto",
+        _route_requested_model="whisper_turbo",
+        _route_requested_language="auto",
+        _route_detected_language="ru",
+        _route_confidence=0.95,
+        _route_sample_count=5,
+        _route_status="complete",
+        _route_method="test-detector",
+        _route_reason="confident-russian",
+        _route_auto_detected=True,
+    )
+    monkeypatch.setattr(cli, "resolve_media_route", lambda *args, **kwargs: routed)
+    monkeypatch.setattr(cli, "run_preflight", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        cli,
+        "_process_item",
+        lambda *args, **kwargs: (
+            '---\nimporter: "media-import"\n---\n\n# Transcript\n',
+            {
+                "status": "complete",
+                "errors": [],
+                "transcription_provider": "gigaam",
+                "transcription_model": "v3_e2e_rnnt",
+            },
+        ),
+    )
+
+    cli._run_import(config, inventory(resolve_source(str(source))))
+
+    manifest = load_manifest(config.output_root / "manifest.json")
+    record = manifest["items"][0]
+    assert manifest["config"]["transcription_provider"] == "auto"
+    assert record["requested_transcription_provider"] == "auto"
+    assert record["resolved_transcription_provider"] == "gigaam"
+    assert record["detected_language"] == "ru"
+    assert record["detection_confidence"] == 0.95
 
 
 def test_same_basename_media_requires_decision_before_writing(tmp_path: Path) -> None:

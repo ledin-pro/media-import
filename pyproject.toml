@@ -14,6 +14,8 @@ dependencies = [
   "docling>=2.121,<3",
   "docling-gigaam>=0.1,<0.2",
   "docling-slim[format-video]>=2.121,<3",
+  "mlx-whisper>=0.4.3,<0.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "openai-whisper>=20250625,<20270000; python_version < '3.15' and (sys_platform != 'darwin' or platform_machine != 'arm64')",
   "pro-ledin-docling-ebook>=0.2,<0.3",
   "pro-ledin-ocr>=0.7,<0.8",
   "PyYAML>=6.0",
