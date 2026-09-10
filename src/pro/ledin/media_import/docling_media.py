@@ -18,7 +18,9 @@ _MAX_MEDIA_CONVERTERS = 4
 
 
 def _prepare_huggingface_cache(config: Config) -> None:
-    home = config.cache_dir / "huggingface"
+    if config.huggingface_cache_dir is None:
+        return
+    home = config.huggingface_cache_dir
     hub = home / "hub"
     hub.mkdir(parents=True, exist_ok=True)
     os.environ["HF_HOME"] = str(home)
@@ -77,6 +79,7 @@ def _converter_key(config: Config, extension: str) -> tuple[object, ...]:
         config.transcription_timeout_seconds,
         config.docling_device,
         str(config.docling_artifacts_path or ""),
+        str(config.huggingface_cache_dir or ""),
     )
 
 

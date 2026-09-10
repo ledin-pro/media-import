@@ -65,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
         child.add_argument("--output-dir", type=Path)
         child.add_argument("--config", type=Path)
         child.add_argument("--cache-dir", type=Path)
+        child.add_argument("--huggingface-cache-dir", type=Path)
         child.add_argument("--asset-mode", choices=["reference", "copy"])
         child.add_argument("--frame-mode", choices=["none", "text", "text-and-images", "images"])
         child.add_argument("--ebook-image-policy", choices=["skip", "referenced", "ocr"])
@@ -121,6 +122,7 @@ def _overrides(args: argparse.Namespace) -> dict[str, Any]:
         "vault_root",
         "output_dir",
         "cache_dir",
+        "huggingface_cache_dir",
         "asset_mode",
         "frame_mode",
         "ebook_image_policy",

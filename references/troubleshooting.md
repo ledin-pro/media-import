@@ -29,8 +29,10 @@ downloading a model.
 
 GigaAM v3 transcribes Russian only. Use `auto`, `ru`, `rus`, or `russian`; other
 explicit languages are rejected during configuration. The first confirmed
-conversion downloads the checksum-verified official model into the media-import
-cache. Long recordings use local Silero processing and no API token is required.
+conversion downloads the checksum-verified official model into the system or
+configured Hugging Face cache. Set `MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR` or
+`--huggingface-cache-dir` to use a specific Hugging Face home. Long recordings
+use local Silero processing and no API token is required.
 
 On Apple Silicon, `MEDIA_IMPORT_DOCLING_DEVICE=mps` is allowed with a warning:
 unsupported GigaAM or Silero operations may execute on CPU. The `mlx` device is

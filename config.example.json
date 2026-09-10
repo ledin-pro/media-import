@@ -2,6 +2,7 @@
   "asset_mode": "reference",
   "frame_mode": "text",
   "layout": "mirror",
+  "huggingface_cache_dir": null,
   "path_map": {},
   "office_fallback": "none",
   "ebook_image_policy": "referenced",

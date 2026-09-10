@@ -18,7 +18,10 @@ text when frame mode includes text. Do not implement a second sampler or timelin
 Provider `gigaam` uses the public `docling-gigaam` audio and video format-option
 factories before any Whisper preset is resolved. It preserves the same document
 timeout, accelerator choice, artifacts path, converter cache, shared model cache,
-and video sampling settings. GigaAM's provider default is `v3_e2e_rnnt`; the
+and video sampling settings. Hugging Face model artifacts use the system or
+environment-configured cache unless `--huggingface-cache-dir` or
+`MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR` supplies a custom Hugging Face home.
+GigaAM's provider default is `v3_e2e_rnnt`; the
 default for all other providers remains `whisper_turbo`.
 
 GigaAM v3 is Russian-focused. Accept language `auto`, `ru`, `rus`, or `russian`

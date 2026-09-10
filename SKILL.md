@@ -37,8 +37,9 @@ uv run media-import --help
 
 For optional local Russian GigaAM v3 transcription, install
 `docling-gigaam>=0.1,<0.2`. It downloads the checksum-verified official model
-into the shared media-import cache on first conversion, uses local Silero for
-long-form audio, and does not require an API token.
+into the configured Hugging Face cache on first conversion, uses local Silero
+for long-form audio, and does not require an API token. Configure that location
+with `--huggingface-cache-dir` or `MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR`.
 
 Ebook import uses `pro-ledin-docling-ebook>=0.2,<0.3` for EPUB, FB2, FB2.ZIP,
 FBZ, MOBI, AZW, and AZW3. The default image policy is `referenced`; alternatives
@@ -126,6 +127,9 @@ for more frequent inventory and OCR/ASR details.
   default.
 - Ebook OCR requires a prompt and replaces pictures with faithful recognized text.
 - Auto-detect spoken and OCR languages.
+- Leave Hugging Face model artifacts at the system or environment-configured
+  location unless `--huggingface-cache-dir` or `MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR`
+  is provided.
 - Prefer a validated existing transcript; otherwise keep transcription provider `auto`.
 - During a confirmed import, `auto` detects spoken language from short samples across the media.
 - Confident Russian routes to local GigaAM v3; other, mixed, or uncertain language stays on

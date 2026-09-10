@@ -78,6 +78,11 @@ See `config.example.json` and `references/routing.md`.
 The canonical environment prefix is `MEDIA_IMPORT_`. Credentials are never
 written to the manifest or included in cache-profile hashes.
 
+`--huggingface-cache-dir` and `MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR` optionally
+set the Hugging Face home used by MLX Whisper, Docling Whisper, and GigaAM. When
+unset, media-import leaves Hugging Face's `HF_HOME`/`HF_HUB_CACHE` settings and
+system default unchanged. Native Whisper continues to use `<cache-dir>/whisper`.
+
 To transcribe Russian media with GigaAM v3:
 
 ```bash
@@ -89,8 +94,8 @@ media-import inspect ./recordings --vault-root ~/vault --output-dir sources/demo
 When no transcription model is explicitly configured, provider `gigaam` uses
 `v3_e2e_rnnt`; every other provider keeps the `whisper_turbo` default. GigaAM v3
 accepts `auto`, `ru`, `rus`, or `russian` and rejects other explicit languages.
-The checksum-verified official model downloads into the media-import cache on
-first real conversion. Long recordings use local Silero long-form processing.
+The checksum-verified official model downloads into the configured Hugging Face
+cache on first real conversion. Long recordings use local Silero long-form processing.
 No API token is required.
 
 The package fallback for ebooks is referenced images. For per-book choices,

@@ -232,6 +232,9 @@ def _aggregate(probabilities: list[Mapping[str, float]], attempted: int) -> Lang
 class WhisperLanguageDetector:
     """Detect language from short targeted media windows using multilingual Whisper."""
 
+    def __init__(self, huggingface_cache_dir: Path | None = None) -> None:
+        self.huggingface_cache_dir = huggingface_cache_dir
+
     def detect(
         self,
         source: Path | str,
@@ -267,7 +270,7 @@ class WhisperLanguageDetector:
             and device.casefold() in {"auto", "mlx", "mps"}
         )
         if use_mlx:
-            sample_probabilities = _detect_with_mlx(samples, cache_dir)
+            sample_probabilities = _detect_with_mlx(samples, self.huggingface_cache_dir)
             method = f"mlx-whisper:{DETECTION_MLX_REPO}"
         else:
             sample_probabilities = _detect_with_native_whisper(samples, cache_dir, device)
@@ -286,17 +289,20 @@ def _sample_file(payload: bytes) -> Iterator[Any]:
 
 
 def _detect_with_mlx(
-    samples: list[bytes], cache_dir: Path
+    samples: list[bytes], huggingface_cache_dir: Path | None
 ) -> list[Mapping[str, float]]:
     from huggingface_hub import snapshot_download
     from mlx_whisper.audio import load_audio, log_mel_spectrogram, pad_or_trim
     from mlx_whisper.decoding import detect_language
     from mlx_whisper.load_models import load_model
 
-    model_path = snapshot_download(
-        repo_id=DETECTION_MLX_REPO,
-        cache_dir=cache_dir / "huggingface" / "hub",
-    )
+    if huggingface_cache_dir is None:
+        model_path = snapshot_download(repo_id=DETECTION_MLX_REPO)
+    else:
+        model_path = snapshot_download(
+            repo_id=DETECTION_MLX_REPO,
+            cache_dir=huggingface_cache_dir / "hub",
+        )
     model = load_model(model_path)
     probabilities: list[Mapping[str, float]] = []
     for payload in samples:
@@ -390,6 +396,7 @@ def detect_language(
     *,
     media_sha256: str | None,
     cache_dir: Path,
+    huggingface_cache_dir: Path | None = None,
     device: str = "auto",
     detector: LanguageDetector | None = None,
 ) -> LanguageDetectionResult:
@@ -400,7 +407,7 @@ def detect_language(
     if cached is not None:
         return cached
 
-    active_detector = detector or WhisperLanguageDetector()
+    active_detector = detector or WhisperLanguageDetector(huggingface_cache_dir)
     try:
         result = active_detector.detect(
             source,
@@ -517,6 +524,7 @@ def resolve_media_route(
         source,
         media_sha256=media_sha256,
         cache_dir=config.cache_dir,
+        huggingface_cache_dir=config.huggingface_cache_dir,
         device=config.docling_device,
         detector=detector,
     )

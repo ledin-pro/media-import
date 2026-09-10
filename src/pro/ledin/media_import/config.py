@@ -95,6 +95,7 @@ class Config:
     vault_root: Path
     output_dir: Path
     cache_dir: Path
+    huggingface_cache_dir: Path | None = None
     asset_mode: str = "reference"
     frame_mode: str = "text"
     layout: str = "mirror"
@@ -152,6 +153,8 @@ class Config:
 
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        if data.get("huggingface_cache_dir") is None:
+            data.pop("huggingface_cache_dir")
         for key in tuple(data):
             if key.startswith("_route_"):
                 data.pop(key)
@@ -185,6 +188,7 @@ ENV_MAP = {
     "vault_root": "MEDIA_IMPORT_VAULT_ROOT",
     "output_dir": "MEDIA_IMPORT_TARGET_DIR",
     "cache_dir": "MEDIA_IMPORT_CACHE_DIR",
+    "huggingface_cache_dir": "MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR",
     "asset_mode": "MEDIA_IMPORT_ASSET_MODE",
     "frame_mode": "MEDIA_IMPORT_FRAME_MODE",
     "layout": "MEDIA_IMPORT_LAYOUT",
@@ -263,6 +267,10 @@ def load_config(
         raise ConfigError("output_dir must not escape vault_root")
 
     cache_dir = _expanded_path(str(values.get("cache_dir") or "~/.cache/media-import"))
+    huggingface_cache_value = values.get("huggingface_cache_dir")
+    huggingface_cache_dir = (
+        _expanded_path(str(huggingface_cache_value)) if huggingface_cache_value else None
+    )
     output_root = (vault_root / output_dir).resolve()
     if output_root == cache_dir or output_root.is_relative_to(cache_dir):
         raise ConfigError("output directory must not be inside the cache directory")
@@ -415,6 +423,7 @@ def load_config(
         vault_root=vault_root,
         output_dir=output_dir,
         cache_dir=cache_dir,
+        huggingface_cache_dir=huggingface_cache_dir,
         asset_mode=asset_mode,
         frame_mode=frame_mode,
         layout=layout,

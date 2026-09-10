@@ -202,6 +202,30 @@ def test_ebook_format_preference_defaults_and_supports_custom_env_value(tmp_path
     assert custom.ebook_format_preference == ("mobi", "epub")
 
 
+def test_huggingface_cache_dir_defaults_and_supports_custom_env_value(tmp_path: Path) -> None:
+    default = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+        },
+        environ={},
+    )
+    custom_path = tmp_path / "huggingface"
+    custom = load_config(
+        overrides={
+            "source": str(tmp_path),
+            "vault_root": tmp_path / "vault",
+            "output_dir": "out",
+        },
+        environ={"MEDIA_IMPORT_HUGGINGFACE_CACHE_DIR": str(custom_path)},
+    )
+
+    assert default.huggingface_cache_dir is None
+    assert "huggingface_cache_dir" not in default.public_dict()
+    assert custom.huggingface_cache_dir == custom_path.resolve()
+
+
 def test_ebook_rejects_unknown_image_policy(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="Unsupported ebook_image_policy"):
         load_config(

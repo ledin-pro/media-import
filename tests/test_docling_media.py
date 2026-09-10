@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -8,7 +9,7 @@ import pro.ledin.media_import.docling_media as docling_media
 from pro.ledin.media_import.config import Config
 
 
-def test_prepare_huggingface_cache_uses_import_cache(tmp_path: Path, monkeypatch) -> None:
+def test_prepare_huggingface_cache_uses_configured_cache(tmp_path: Path, monkeypatch) -> None:
     import huggingface_hub.constants
 
     monkeypatch.delenv("HF_HOME", raising=False)
@@ -18,10 +19,36 @@ def test_prepare_huggingface_cache_uses_import_cache(tmp_path: Path, monkeypatch
         vault_root=tmp_path / "vault",
         output_dir=Path("corpus"),
         cache_dir=tmp_path / "cache",
+        huggingface_cache_dir=tmp_path / "huggingface",
     )
     docling_media._prepare_huggingface_cache(config)
-    assert (config.cache_dir / "huggingface/hub").is_dir()
-    assert str(config.cache_dir / "huggingface/hub") == huggingface_hub.constants.HF_HUB_CACHE
+    assert (tmp_path / "huggingface/hub").is_dir()
+    assert str(tmp_path / "huggingface/hub") == huggingface_hub.constants.HF_HUB_CACHE
+
+
+def test_prepare_huggingface_cache_leaves_defaults_untouched(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import huggingface_hub.constants
+
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.setattr(huggingface_hub.constants, "HF_HOME", "system-home")
+    monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", "system-hub")
+    config = Config(
+        source="source.wav",
+        vault_root=tmp_path / "vault",
+        output_dir=Path("corpus"),
+        cache_dir=tmp_path / "cache",
+    )
+
+    docling_media._prepare_huggingface_cache(config)
+
+    assert "HF_HOME" not in os.environ
+    assert "HF_HUB_CACHE" not in os.environ
+    assert huggingface_hub.constants.HF_HOME == "system-home"
+    assert huggingface_hub.constants.HF_HUB_CACHE == "system-hub"
+    assert not (tmp_path / "cache/huggingface").exists()
 
 
 def test_media_converter_is_reused_for_matching_options(tmp_path: Path, monkeypatch) -> None:

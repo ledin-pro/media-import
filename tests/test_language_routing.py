@@ -146,6 +146,40 @@ def test_mixed_votes_are_not_confident() -> None:
     assert result.detected_language is None
 
 
+def test_whisper_detector_uses_configured_or_system_huggingface_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: list[Path | None] = []
+    monkeypatch.setattr(routing.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(routing.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(routing, "_probe_duration", lambda source: 1.0)
+    monkeypatch.setattr(routing, "_sample_starts", lambda duration: [0.0])
+    monkeypatch.setattr(routing, "_extract_sample", lambda source, start, duration: b"sample")
+    monkeypatch.setattr(routing, "_usable_wav", lambda payload: True)
+
+    def fake_detect(samples, cache_dir):
+        captured.append(cache_dir)
+        return [{"en": 1.0}]
+
+    monkeypatch.setattr(routing, "_detect_with_mlx", fake_detect)
+    detector = routing.WhisperLanguageDetector(tmp_path / "huggingface")
+
+    detector.detect(
+        "source.wav",
+        media_sha256=None,
+        cache_dir=tmp_path / "cache",
+        device="auto",
+    )
+    routing.WhisperLanguageDetector().detect(
+        "source.wav",
+        media_sha256=None,
+        cache_dir=tmp_path / "cache",
+        device="auto",
+    )
+
+    assert captured == [tmp_path / "huggingface", None]
+
+
 def test_unavailable_detection_is_not_cached(tmp_path: Path) -> None:
     detector = FailingDetector()
     arguments = {

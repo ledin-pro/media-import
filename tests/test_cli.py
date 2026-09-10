@@ -210,6 +210,24 @@ def test_cli_accepts_gigaam_provider() -> None:
     assert args.transcription_provider == "gigaam"
 
 
+def test_cli_accepts_huggingface_cache_dir(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "huggingface"
+    args = cli._parser().parse_args(
+        [
+            "inspect",
+            "source.wav",
+            "--vault-root",
+            "/tmp/vault",
+            "--output-dir",
+            "corpus",
+            "--huggingface-cache-dir",
+            str(cache_dir),
+        ]
+    )
+
+    assert cli._overrides(args)["huggingface_cache_dir"] == cache_dir
+
+
 def test_cli_accepts_ebook_options() -> None:
     args = cli._parser().parse_args(
         [
